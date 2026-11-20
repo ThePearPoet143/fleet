@@ -1,4 +1,5 @@
 // https://pkg.go.dev/os/exec#LookPath
+// https://pkg.go.dev/os/exec#Cmd.Output
 package doctor
 
 import (
@@ -12,7 +13,7 @@ func find(name string) string {
 }
 
 func output(name string, args ...string) string {
-	out, _ := exec.Command(name, args...).CombinedOutput()
+	out, _ := exec.Command(name, args...).Output()
 	return string(out)
 }
 
