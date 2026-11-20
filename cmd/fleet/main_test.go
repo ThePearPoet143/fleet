@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"os"
 	"path/filepath"
@@ -114,11 +118,8 @@ func TestSignInRefusesAKeyOthersCanRead(t *testing.T) {
 
 func TestSetupTakesTheNewKeyFromDownloadsAndSignsInWithIt(t *testing.T) {
 	dir, dl := t.TempDir(), t.TempDir()
-	downloads, keyWait = func() string { return dl }, 2*time.Second
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		os.WriteFile(filepath.Join(dl, "someone-agents.2026-11-20.private-key.pem"), []byte("key"), 0o644)
-	}()
+	useDownloads(t, dl, 2*time.Second)
+	dropKey(t, dl)
 	var signedWith string
 	gh := setup.GitHub{User: fake, App: func(key string, id int64) (string, string, error) {
 		signedWith = key
@@ -135,7 +136,7 @@ func TestSetupTakesTheNewKeyFromDownloadsAndSignsInWithIt(t *testing.T) {
 
 func TestSetupWithYesWaitsForNoKey(t *testing.T) {
 	dir := t.TempDir()
-	downloads, keyWait = func() string { return t.TempDir() }, time.Hour
+	useDownloads(t, t.TempDir(), time.Hour)
 	var out, errOut bytes.Buffer
 	if code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--yes"}, dir, strings.NewReader(""), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut); code != 0 {
 		t.Fatalf("setup = %d, %q", code, errOut.String())
@@ -211,6 +212,37 @@ func TestSetupWithYesSaysWhereToInstallTheApp(t *testing.T) {
 	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
 	s, _, _ := settings.Load(settings.Path(dir))
 	if code != 1 || !strings.Contains(errOut.String(), "https://github.com/settings/apps/someone-agents") || s.App.ID != 42 || s.App.Installation != 0 {
+		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s.App)
+	}
+}
+
+func useDownloads(t *testing.T, dir string, wait time.Duration) {
+	oldDownloads, oldWait := downloads, keyWait
+	downloads, keyWait = func() string { return dir }, wait
+	t.Cleanup(func() { downloads, keyWait = oldDownloads, oldWait })
+}
+
+func dropKey(t *testing.T, dir string) {
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(k)})
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		os.WriteFile(filepath.Join(dir, "someone-agents.2026-11-20.private-key.pem"), b, 0o644)
+	}()
+}
+
+func TestAKeyTakenThisRunIsKeptWhenSignInFails(t *testing.T) {
+	dir, dl := t.TempDir(), t.TempDir()
+	useDownloads(t, dl, 2*time.Second)
+	dropKey(t, dl)
+	gh := setup.GitHub{User: fake, App: func(string, int64) (string, string, error) { return "", "", errors.New("network down") }}
+	var out, errOut bytes.Buffer
+	code := setupCmd(nil, dir, strings.NewReader("1\n1\nsomeone\n\n\n42\n\n"), setup.Detected{}, gh, &out, &errOut)
+	s, _, _ := settings.Load(settings.Path(dir))
+	if code != 1 || s.App.Key != filepath.Join(dir, "fleet", "someone-agents.2026-11-20.private-key.pem") {
 		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s.App)
 	}
 }

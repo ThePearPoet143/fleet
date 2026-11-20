@@ -85,3 +85,8 @@ func (c *Client) Installation(jwt, user string) (int64, error) {
 	}
 	return inst.ID, err
 }
+
+func CheckKey(pemBytes []byte) error {
+	_, err := privateKey(pemBytes)
+	return err
+}

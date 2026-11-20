@@ -79,13 +79,21 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 	}
 	answers := setup.Answers(current, f, found)
 	var askErr error
+	had := answers.App.Key
 	if !f.Yes {
 		askErr = setup.Ask(&answers, gh.User, open, in, out, piped)
 		if askErr == nil {
 			askErr = takeKey(&answers, filepath.Dir(path), out)
 		}
 	}
+	taken := ""
+	if had == "" && answers.App.Key != "" {
+		taken = answers.App.Key
+	}
 	answers, checkErr := setup.Check(answers, current, gh)
+	if taken != "" && answers.App.Key == "" {
+		answers.App.Key = taken
+	}
 	if checkErr == nil {
 		checkErr = install(&answers, gh, !f.Yes, out)
 	}
@@ -111,12 +119,11 @@ func takeKey(a *settings.Settings, dir string, out io.Writer) error {
 	fmt.Fprintf(out, "Waiting up to %s for it in %s…\n", keyWait, downloads())
 	open(page)
 	key, err := setup.PickUpKey(downloads(), dir, start, keyWait, time.Second)
-	if err != nil {
-		return err
+	if key != "" {
+		fmt.Fprintln(out, "kept the key, readable only by you, at", key)
+		a.App.Key = key
 	}
-	fmt.Fprintln(out, "kept the key, readable only by you, at", key)
-	a.App.Key = key
-	return nil
+	return err
 }
 
 func appJWT(key string, id int64) (string, error) {
