@@ -27,15 +27,22 @@ func run(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "fleet doctor:", err)
 		return 2
 	}
+	var s settings.Settings
 	checks := []doctor.Check{}
 	if dir, err := os.UserConfigDir(); err != nil {
 		checks = append(checks, doctor.Settings("", false, err))
 	} else {
 		path := settings.Path(dir)
-		_, found, err := settings.Load(path)
+		loaded, found, err := settings.Load(path)
+		s = loaded
 		checks = append(checks, doctor.Settings(path, found, err))
 	}
-	checks = append(checks, doctor.Mac()...)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(errOut, "fleet doctor:", err)
+		return 2
+	}
+	checks = append(checks, doctor.Mac(home, s.GitHub.User)...)
 	return report(checks, out)
 }
 
