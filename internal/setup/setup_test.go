@@ -61,14 +61,14 @@ var good = settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.
 func TestCheckKeepsNoReachOnASharedMachine(t *testing.T) {
 	shared := good
 	shared.Use, shared.Reach = "shared", []string{"tailscale"}
-	a, err := Check(shared, settings.Settings{}, lookup)
+	a, err := Check(shared, settings.Settings{}, GitHub{lookup, signedAs("", "")})
 	if err != nil || a.Reach != nil {
 		t.Fatalf("shared = %+v, %v; want no reach", a, err)
 	}
 }
 
 func TestCheckSavesGitHubsSpellingOfTheUsername(t *testing.T) {
-	if a, err := Check(good, settings.Settings{}, lookup); err != nil || a.GitHub.User != "Someone" {
+	if a, err := Check(good, settings.Settings{}, GitHub{lookup, signedAs("", "")}); err != nil || a.GitHub.User != "Someone" {
 		t.Fatalf("Check = %+v, %v", a, err)
 	}
 }
@@ -88,11 +88,11 @@ func TestCheckRefusesAnswersItCannotUse(t *testing.T) {
 	for want, change := range cases {
 		s := good
 		change(&s)
-		if _, err := Check(s, settings.Settings{}, lookup); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err := Check(s, settings.Settings{}, GitHub{lookup, signedAs("", "")}); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Check with a bad %s: error %v", want, err)
 		}
 	}
-	if _, err := Check(good, settings.Settings{}, lookup); err != nil {
+	if _, err := Check(good, settings.Settings{}, GitHub{lookup, signedAs("", "")}); err != nil {
 		t.Errorf("good answers refused: %v", err)
 	}
 }
@@ -101,7 +101,7 @@ func TestCheckKeepsValidAnswersWhenOneFails(t *testing.T) {
 	current := settings.Settings{GitHub: settings.GitHub{User: "Old"}}
 	s := good
 	s.Purpose, s.GitHub.User = "laptop", "nobody"
-	a, err := Check(s, current, lookup)
+	a, err := Check(s, current, GitHub{lookup, signedAs("", "")})
 	if err == nil || a.Purpose != "laptop" || a.App.ID != 42 || a.GitHub.User != "Old" {
 		t.Fatalf("Check = %+v, %v; want the valid answers kept and the old user back", a, err)
 	}
@@ -189,7 +189,7 @@ func TestARejectedUsernameLeavesTheAppAsItWas(t *testing.T) {
 	current := settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.GitHub{User: "octocat"}, App: settings.App{ID: 42, Slug: "octocat-agents"}}
 	s := current
 	s.GitHub.User, s.App.Slug = "nobody", "nobody-agents"
-	a, err := Check(s, current, lookup)
+	a, err := Check(s, current, GitHub{lookup, signedAs("", "")})
 	if err == nil || a.GitHub.User != "octocat" || a.App.Slug != "octocat-agents" || a.App.ID != 42 {
 		t.Fatalf("Check = %+v, %v; want the old user and app", a, err)
 	}
@@ -230,5 +230,44 @@ func TestEnterSkipsAGitHubQuestionSoTheRestIsSaved(t *testing.T) {
 	}
 	if err := onGitHub("", lookup)("nobody"); err == nil {
 		t.Error("an unknown username passed")
+	}
+}
+
+func signedAs(slug, owner string) SignedApp {
+	return func(key string, id int64) (string, string, error) {
+		if key == "/keys/broken.pem" {
+			return "", "", errors.New("GitHub answered 401 Unauthorized for /app")
+		}
+		return slug, owner, nil
+	}
+}
+
+func TestSigningInAsTheAppCatchesAWrongName(t *testing.T) {
+	current := settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.GitHub{User: "Someone"}, App: settings.App{ID: 7, Slug: "old-agents"}}
+	s := good
+	s.App.Key = "/keys/a.pem"
+	a, err := Check(s, current, GitHub{lookup, signedAs("real-agents", "Someone")})
+	if err == nil || !strings.Contains(err.Error(), `App ID 42 is "real-agents", not "bots"`) || a.App.Slug != "old-agents" || a.App.ID != 7 {
+		t.Fatalf("Check = %+v, %v", a, err)
+	}
+}
+
+func TestSigningInAsTheAppCatchesAnotherOwnerAndABadKey(t *testing.T) {
+	s := good
+	s.App.Key = "/keys/a.pem"
+	if _, err := Check(s, settings.Settings{}, GitHub{lookup, signedAs("bots", "other")}); err == nil || !strings.Contains(err.Error(), `owned by "other"`) {
+		t.Errorf("other owner: %v", err)
+	}
+	s.App.Key = "/keys/broken.pem"
+	if a, err := Check(s, settings.Settings{}, GitHub{lookup, signedAs("bots", "Someone")}); err == nil || a.App.Key != "" {
+		t.Errorf("broken key = %+v, %v; want it refused and not saved", a, err)
+	}
+}
+
+func TestSigningInAsTheAppPasses(t *testing.T) {
+	s := good
+	s.App.Key = "/keys/a.pem"
+	if a, err := Check(s, settings.Settings{}, GitHub{lookup, signedAs("Bots", "Someone")}); err != nil || a.App.Slug != "Bots" {
+		t.Fatalf("Check = %+v, %v; want GitHub's spelling of the app", a, err)
 	}
 }

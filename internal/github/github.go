@@ -24,12 +24,18 @@ func (c *Client) get(kind, name, missing string, v any) error {
 	if name == "" || name == "." || name == ".." {
 		return fmt.Errorf("%q isn't a GitHub name", name)
 	}
-	path := "/" + kind + "/" + url.PathEscape(name)
+	return c.call("/"+kind+"/"+url.PathEscape(name), "", missing, v)
+}
+
+func (c *Client) call(path, jwt, missing string, v any) error {
 	req, err := http.NewRequest(http.MethodGet, c.Base+path, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if jwt != "" {
+		req.Header.Set("Authorization", "Bearer "+jwt)
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err

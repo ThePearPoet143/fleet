@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"time"
 
 	"github.com/ThePearPoet143/fleet/internal/doctor"
 	"github.com/ThePearPoet143/fleet/internal/github"
@@ -49,14 +50,14 @@ func run(args []string, out, errOut io.Writer) int {
 			open = func(url string) { _ = exec.Command("open", url).Start() }
 			piped = false
 		}
-		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), github.New().User, out, errOut); code != 0 {
+		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), setup.GitHub{User: github.New().User, App: signIn(github.New())}, out, errOut); code != 0 {
 			return code
 		}
 	}
 	return doctorCmd(out, errOut)
 }
 
-func setupCmd(args []string, configDir string, in io.Reader, found setup.Detected, user setup.Lookup, out, errOut io.Writer) int {
+func setupCmd(args []string, configDir string, in io.Reader, found setup.Detected, gh setup.GitHub, out, errOut io.Writer) int {
 	f, err := setup.Parse(args)
 	if err != nil {
 		fmt.Fprintf(errOut, "fleet setup: %v\n%s\n", err, usage)
@@ -71,9 +72,9 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 	answers := setup.Answers(current, f, found)
 	var askErr error
 	if !f.Yes {
-		askErr = setup.Ask(&answers, user, open, in, out, piped)
+		askErr = setup.Ask(&answers, gh.User, open, in, out, piped)
 	}
-	answers, checkErr := setup.Check(answers, current, user)
+	answers, checkErr := setup.Check(answers, current, gh)
 	checkErr = errors.Join(askErr, checkErr)
 	if err := settings.Save(path, answers); err != nil {
 		fmt.Fprintln(errOut, "fleet setup:", err)
@@ -85,6 +86,28 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		return 1
 	}
 	return 0
+}
+
+func signIn(c *github.Client) setup.SignedApp {
+	return func(key string, id int64) (string, string, error) {
+		info, err := os.Stat(key)
+		if err != nil {
+			return "", "", err
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			return "", "", fmt.Errorf("others can read it; run chmod 600 %s", key)
+		}
+		pemBytes, err := os.ReadFile(key)
+		if err != nil {
+			return "", "", err
+		}
+		jwt, err := github.JWT(id, pemBytes, time.Now())
+		if err != nil {
+			return "", "", err
+		}
+		app, err := c.App(jwt)
+		return app.Slug, app.Owner, err
+	}
 }
 
 func doctorCmd(out, errOut io.Writer) int {
