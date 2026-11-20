@@ -61,7 +61,7 @@ func Parse(args []string) (Flags, error) {
 	}
 	fs.Visit(func(fl *flag.Flag) { f.Set[fl.Name] = true })
 	a.Tools, a.Reach = list(*tools), list(*reach)
-	return f, nil
+	return f, errors.Join(choices(*a)...)
 }
 
 func pick[T any](set bool, flag, current, fallback T, empty func(T) bool) T {
@@ -74,23 +74,30 @@ func pick[T any](set bool, flag, current, fallback T, empty func(T) bool) T {
 	return fallback
 }
 
+func DeriveApp(slug, oldUser, newUser string) string {
+	if newUser != "" && (slug == "" || slug == oldUser+"-agents") {
+		return newUser + "-agents"
+	}
+	return slug
+}
+
 func Answers(current settings.Settings, f Flags, d Detected) settings.Settings {
 	str := func(s string) bool { return s == "" }
-	lst := func(l []string) bool { return len(l) == 0 }
+	saved := func([]string) bool { return current.Purpose == "" }
 	a := f.Answers
 	out := settings.Settings{
 		Purpose: pick(f.Set["purpose"], a.Purpose, current.Purpose, "host", str),
 		Use:     pick(f.Set["use"], a.Use, current.Use, "personal", str),
-		Tools:   pick(f.Set["tools"], a.Tools, current.Tools, d.Tools, lst),
-		Reach:   pick(f.Set["reach"], a.Reach, current.Reach, d.Reach, lst),
+		Tools:   pick(f.Set["tools"], a.Tools, current.Tools, d.Tools, saved),
+		Reach:   pick(f.Set["reach"], a.Reach, current.Reach, d.Reach, saved),
 		GitHub:  settings.GitHub{User: pick(f.Set["github-user"], a.GitHub.User, current.GitHub.User, "", str)},
 	}
 	out.App.Key = pick(f.Set["key"], a.App.Key, current.App.Key, "", str)
-	fallback := ""
-	if out.GitHub.User != "" {
-		fallback = out.GitHub.User + "-agents"
+	slug, from := current.App.Slug, current.GitHub.User
+	if f.Set["app"] {
+		slug, from = a.App.Slug, ""
 	}
-	out.App.Slug = pick(f.Set["app"], a.App.Slug, current.App.Slug, fallback, str)
+	out.App.Slug = DeriveApp(slug, from, out.GitHub.User)
 	return out
 }
 
@@ -98,19 +105,13 @@ func known(options []Option, key string) bool {
 	return slices.ContainsFunc(options, func(o Option) bool { return o.Key == key })
 }
 
-func Finish(s settings.Settings) (settings.Settings, error) {
+func choices(s settings.Settings) []error {
 	var errs []error
-	if !known(Purposes, s.Purpose) {
+	if s.Purpose != "" && !known(Purposes, s.Purpose) {
 		errs = append(errs, fmt.Errorf("purpose %q: use host or laptop", s.Purpose))
 	}
-	if !known(Uses, s.Use) {
+	if s.Use != "" && !known(Uses, s.Use) {
 		errs = append(errs, fmt.Errorf("use %q: use personal or shared", s.Use))
-	}
-	if s.GitHub.User == "" {
-		errs = append(errs, errors.New("GitHub user: needed (--github-user)"))
-	}
-	if s.App.Slug == "" {
-		errs = append(errs, errors.New("app: needed (--app)"))
 	}
 	for _, t := range s.Tools {
 		if !known(Tools, t) {
@@ -121,6 +122,23 @@ func Finish(s settings.Settings) (settings.Settings, error) {
 		if !known(Reaches, r) {
 			errs = append(errs, fmt.Errorf("reach: %q isn't one of tailscale, t3, ssh", r))
 		}
+	}
+	return errs
+}
+
+func Finish(s settings.Settings) (settings.Settings, error) {
+	errs := choices(s)
+	if s.Purpose == "" {
+		errs = append(errs, errors.New("purpose: needed (--purpose)"))
+	}
+	if s.Use == "" {
+		errs = append(errs, errors.New("use: needed (--use)"))
+	}
+	if s.GitHub.User == "" {
+		errs = append(errs, errors.New("GitHub user: needed (--github-user)"))
+	}
+	if s.App.Slug == "" {
+		errs = append(errs, errors.New("app: needed (--app)"))
 	}
 	if s.App.Key != "" && !filepath.IsAbs(s.App.Key) {
 		errs = append(errs, fmt.Errorf("key %q: give its full path", s.App.Key))
