@@ -1,5 +1,6 @@
 // https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app
 // https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app
+// https://docs.github.com/en/rest/apps/apps#get-a-user-installation-for-the-authenticated-app
 // https://pkg.go.dev/crypto/rsa#SignPKCS1v15
 package github
 
@@ -13,9 +14,12 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"net/url"
 	"strconv"
 	"time"
 )
+
+var ErrNotInstalled = errors.New("the app isn't installed on this account")
 
 type App struct {
 	ID          int64
@@ -67,6 +71,19 @@ func (c *Client) App(jwt string) (App, error) {
 		return App{}, err
 	}
 	return App{app.ID, app.Slug, app.Owner.Login}, nil
+}
+
+func (c *Client) Installation(jwt, user string) (int64, error) {
+	var inst struct{ ID int64 }
+	err := c.call("/users/"+url.PathEscape(user)+"/installation", jwt, "not installed", &inst)
+	var missing notFound
+	if errors.As(err, &missing) {
+		return 0, ErrNotInstalled
+	}
+	if err == nil && inst.ID == 0 {
+		err = errors.New("GitHub gave no installation")
+	}
+	return inst.ID, err
 }
 
 func CheckKey(pemBytes []byte) error {

@@ -142,8 +142,9 @@ type Lookup func(name string) (string, error)
 type SignedApp func(key string, id int64) (slug, owner string, err error)
 
 type GitHub struct {
-	User Lookup
-	App  SignedApp
+	User         Lookup
+	App          SignedApp
+	Installation func(key string, id int64, user string) (int64, error)
 }
 
 func SettingsPage(slug string) string {

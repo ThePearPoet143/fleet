@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+type notFound string
+
+func (n notFound) Error() string { return string(n) }
+
 type Client struct {
 	Base string
 	HTTP *http.Client
@@ -45,7 +49,7 @@ func (c *Client) call(path, jwt, missing string, v any) error {
 	case http.StatusOK:
 		return json.NewDecoder(resp.Body).Decode(v)
 	case http.StatusNotFound:
-		return fmt.Errorf("%s", missing)
+		return notFound(missing)
 	case http.StatusForbidden, http.StatusTooManyRequests:
 		if resp.Header.Get("X-Ratelimit-Remaining") == "0" {
 			reset, _ := strconv.ParseInt(resp.Header.Get("X-Ratelimit-Reset"), 10, 64)
