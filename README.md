@@ -17,3 +17,17 @@ go run ./cmd/fleet doctor
 ```
 
 Each check is a function tested with sample output (`go test ./...`), on Linux in CI.
+
+## Setup
+
+`fleet setup` asks what this machine is for, whether it's personal or shared, your GitHub username, your agents'
+GitHub App (`<username>-agents` unless you say otherwise), the AI tools on it and how it's reached. It detects the tools
+and Tailscale or T3 Code, and on a rerun shows each current answer, which Enter keeps. A shared machine stores no way to
+reach it. Questions are plain prompts (huh's accessible mode), and each has a flag, so agents can run it unprompted:
+
+```
+go run ./cmd/fleet setup --github-user <name> --tools claude,codex --yes
+```
+
+It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
+app key's path (`--key`), never the key.
