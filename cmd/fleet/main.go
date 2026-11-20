@@ -1,4 +1,5 @@
 // https://pkg.go.dev/os#UserConfigDir
+// https://pkg.go.dev/os#FileMode
 package main
 
 import (
@@ -9,24 +10,73 @@ import (
 
 	"github.com/ThePearPoet143/fleet/internal/doctor"
 	"github.com/ThePearPoet143/fleet/internal/settings"
+	"github.com/ThePearPoet143/fleet/internal/setup"
 	"github.com/ThePearPoet143/fleet/internal/system"
 )
 
-const usage = "usage: fleet doctor"
+const usage = "usage: fleet doctor | fleet setup [--purpose host|laptop] [--use personal|shared] [--github-user name]\n" +
+	"  [--app slug] [--tools claude,codex] [--reach tailscale,t3,ssh] [--key /full/path.pem] [--yes]"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
 func run(args []string, out, errOut io.Writer) int {
-	if len(args) != 1 || args[0] != "doctor" {
+	if len(args) == 0 || (args[0] != "doctor" && args[0] != "setup") || (args[0] == "doctor" && len(args) > 1) {
 		fmt.Fprintln(errOut, usage)
 		return 2
 	}
 	if _, err := system.Detect(runtime.GOOS); err != nil {
-		fmt.Fprintln(errOut, "fleet doctor:", err)
+		fmt.Fprintf(errOut, "fleet %s: %v\n", args[0], err)
 		return 2
 	}
+	if args[0] == "setup" {
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			fmt.Fprintln(errOut, "fleet setup:", err)
+			return 2
+		}
+		info, _ := os.Stdin.Stat()
+		interactive := info != nil && info.Mode()&os.ModeCharDevice != 0
+		if code := setupCmd(args[1:], dir, interactive, setup.Detect(), out, errOut); code != 0 {
+			return code
+		}
+	}
+	return doctorCmd(out, errOut)
+}
+
+func setupCmd(args []string, configDir string, interactive bool, found setup.Detected, out, errOut io.Writer) int {
+	f, err := setup.Parse(args)
+	if err != nil {
+		fmt.Fprintf(errOut, "fleet setup: %v\n%s\n", err, usage)
+		return 2
+	}
+	path := settings.Path(configDir)
+	current, _, err := settings.Load(path)
+	if err != nil {
+		fmt.Fprintln(errOut, "fleet setup:", err)
+		return 2
+	}
+	answers := setup.Answers(current, f, found)
+	if interactive && !f.Yes {
+		if err := setup.Ask(&answers); err != nil {
+			fmt.Fprintln(errOut, "fleet setup:", err)
+			return 1
+		}
+	}
+	answers, err = setup.Finish(answers)
+	if err == nil {
+		err = settings.Save(path, answers)
+	}
+	if err != nil {
+		fmt.Fprintln(errOut, "fleet setup:", err)
+		return 1
+	}
+	fmt.Fprintln(out, "saved", path)
+	return 0
+}
+
+func doctorCmd(out, errOut io.Writer) int {
 	var s settings.Settings
 	checks := []doctor.Check{}
 	if dir, err := os.UserConfigDir(); err != nil {
