@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -32,7 +34,7 @@ func TestReportPrintsEveryLineAndFailsWhenOneFails(t *testing.T) {
 func TestSetupWithFlagsAsksNothingAndSaves(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--yes"}, dir, strings.NewReader(""), setup.Detected{Tools: []string{"claude"}}, fake, &out, &errOut)
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--yes"}, dir, strings.NewReader(""), setup.Detected{Tools: []string{"claude"}}, setup.GitHub{User: fake}, &out, &errOut)
 	s, found, err := settings.Load(settings.Path(dir))
 	if code != 0 || !found || err != nil || s.App.Slug != "someone-agents" || s.App.ID != 42 || s.Tools[0] != "claude" {
 		t.Fatalf("setup = %d, %q; saved %+v, %v, %v", code, errOut.String(), s, found, err)
@@ -42,8 +44,8 @@ func TestSetupWithFlagsAsksNothingAndSaves(t *testing.T) {
 func TestSetupRerunKeepsCurrentAnswers(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--purpose", "laptop"}, dir, strings.NewReader(""), setup.Detected{}, fake, &out, &errOut)
-	if code := setupCmd(nil, dir, strings.NewReader(""), setup.Detected{}, fake, &out, &errOut); code != 0 {
+	setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--purpose", "laptop"}, dir, strings.NewReader(""), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut)
+	if code := setupCmd(nil, dir, strings.NewReader(""), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut); code != 0 {
 		t.Fatalf("rerun = %d, %q", code, errOut.String())
 	}
 	if s, _, _ := settings.Load(settings.Path(dir)); s.Purpose != "laptop" || s.GitHub.User != "someone" || s.App.ID != 42 {
@@ -54,7 +56,7 @@ func TestSetupRerunKeepsCurrentAnswers(t *testing.T) {
 func TestSetupKeepsValidAnswersWhenOneFails(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	code := setupCmd([]string{"--github-user", "nobody", "--app", "bots", "--app-id", "42", "--purpose", "laptop"}, dir, strings.NewReader(""), setup.Detected{}, fake, &out, &errOut)
+	code := setupCmd([]string{"--github-user", "nobody", "--app", "bots", "--app-id", "42", "--purpose", "laptop"}, dir, strings.NewReader(""), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut)
 	if code != 1 || !strings.Contains(errOut.String(), `no GitHub account "nobody"`) {
 		t.Fatalf("setup = %d, %q", code, errOut.String())
 	}
@@ -73,7 +75,7 @@ func fake(name string) (string, error) {
 func TestPipedAnswersDriveTheForm(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	code := setupCmd(nil, dir, strings.NewReader("1\n1\nsomeone\n\n\n42\n\n"), setup.Detected{Tools: []string{"claude"}}, fake, &out, &errOut)
+	code := setupCmd(nil, dir, strings.NewReader("1\n1\nsomeone\n\n\n42\n\n"), setup.Detected{Tools: []string{"claude"}}, setup.GitHub{User: fake}, &out, &errOut)
 	s, _, _ := settings.Load(settings.Path(dir))
 	if code != 0 || s.GitHub.User != "someone" || s.App.ID != 42 || s.Tools[0] != "claude" {
 		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s)
@@ -83,9 +85,25 @@ func TestPipedAnswersDriveTheForm(t *testing.T) {
 func TestABadPipedAnswerFailsButKeepsTheAnswersBeforeIt(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	code := setupCmd(nil, dir, strings.NewReader("2\n9\n"), setup.Detected{}, fake, &out, &errOut)
+	code := setupCmd(nil, dir, strings.NewReader("2\n9\n"), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut)
 	s, _, _ := settings.Load(settings.Path(dir))
 	if code != 1 || !strings.Contains(errOut.String(), `answer "9"`) || s.Purpose != "laptop" {
 		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s)
+	}
+}
+
+func TestSignInRefusesAKeyOthersCanRead(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "a.pem")
+	if err := os.WriteFile(key, []byte("not a key"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := signIn(nil)(key, 42); err == nil || !strings.Contains(err.Error(), "chmod 600") {
+		t.Fatalf("readable key: %v", err)
+	}
+	if err := os.Chmod(key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := signIn(nil)(key, 42); err == nil || err.Error() != "the key isn't a PEM file" {
+		t.Fatalf("broken key: %v", err)
 	}
 }
