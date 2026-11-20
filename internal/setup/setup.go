@@ -75,7 +75,7 @@ func pick[T any](set bool, flag, current, fallback T, empty func(T) bool) T {
 }
 
 func DeriveApp(slug, oldUser, newUser string) string {
-	if newUser != "" && (slug == "" || slug == oldUser+"-agents") {
+	if newUser != "" && (slug == "" || strings.EqualFold(slug, oldUser+"-agents")) {
 		return newUser + "-agents"
 	}
 	return slug

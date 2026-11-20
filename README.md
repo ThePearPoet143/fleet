@@ -30,5 +30,5 @@ go run ./cmd/fleet setup --github-user <name> --tools claude,codex --yes
 ```
 
 It checks the username and the app on GitHub (public `GET /users/{name}` and `GET /apps/{slug}`, the app owned by
-you) and keeps the app's ID, which stays the same if the app is renamed. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
+you) and keeps the app's ID. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
 app key's path (`--key`), never the key.
