@@ -16,6 +16,6 @@ permissions:
 
 jobs:
   core:
-    uses: ThePearPoet143/ci/.github/workflows/core.yml@v0.7.0
+    uses: ThePearPoet143/ci/.github/workflows/core.yml@v0.7.1
     with:
       issue-prefix: HQ
