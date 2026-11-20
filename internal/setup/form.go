@@ -2,6 +2,7 @@
 package setup
 
 import (
+	"io"
 	"strconv"
 	"strings"
 
@@ -60,10 +61,27 @@ func appID(now string) func(string) error {
 	}
 }
 
-func Ask(a *settings.Settings, user Lookup, open func(url string)) error {
+type form struct {
+	in  *Lines
+	out io.Writer
+}
+
+func (f form) run(group *huh.Group) error {
+	f.in.EmptyAs = ""
+	return huh.NewForm(group).WithAccessible(true).WithInput(f.in).WithOutput(f.out).Run()
+}
+
+func (f form) choose(title string, list []Option, value *[]string) error {
+	f.in.EmptyAs = "0"
+	field := huh.NewMultiSelect[string]().Title(title + " (Enter confirms)").Options(options(list)...).Value(value)
+	return huh.NewForm(huh.NewGroup(field)).WithAccessible(true).WithInput(f.in).WithOutput(f.out).Run()
+}
+
+func Ask(a *settings.Settings, user Lookup, open func(url string), in io.Reader, out io.Writer) error {
+	f := form{NewLines(in), out}
 	name, app := "", ""
 	oldUser, oldSlug := a.GitHub.User, a.App.Slug
-	if err := run(huh.NewGroup(
+	if err := f.run(huh.NewGroup(
 		huh.NewSelect[string]().Title(Title("What is this machine for?", a.Purpose)).Options(options(Purposes)...).Value(&a.Purpose),
 		huh.NewSelect[string]().Title(Title("Is it personal or shared?", a.Use)).Options(options(Uses)...).Value(&a.Use),
 		huh.NewInput().Title(Title("Your GitHub username", a.GitHub.User)+skip(a.GitHub.User)).Validate(onGitHub(a.GitHub.User, user)).Value(&name),
@@ -72,28 +90,28 @@ func Ask(a *settings.Settings, user Lookup, open func(url string)) error {
 	}
 	a.GitHub.User = Keep(name, a.GitHub.User)
 	a.App.Slug = DeriveApp(a.App.Slug, oldUser, a.GitHub.User)
-	if err := run(huh.NewGroup(
+	if err := f.run(huh.NewGroup(
 		huh.NewInput().Title(Title("Your agents' GitHub App, as in its URL", a.App.Slug)).Value(&app),
-		huh.NewMultiSelect[string]().Title("AI tools on this machine").Options(options(Tools)...).Value(&a.Tools),
 	)); err != nil {
+		return err
+	}
+	if err := f.choose("AI tools on this machine", Tools, &a.Tools); err != nil {
 		return err
 	}
 	a.App.Slug = Keep(app, a.App.Slug)
 	if !strings.EqualFold(a.App.Slug, oldSlug) {
 		a.App.ID = 0
 	}
-	if err := askID(a, open); err != nil {
+	if err := f.askID(a, open); err != nil {
 		return err
 	}
 	if a.Use == "shared" {
 		return nil
 	}
-	return run(huh.NewGroup(
-		huh.NewMultiSelect[string]().Title("How is it reached?").Options(options(Reaches)...).Value(&a.Reach),
-	))
+	return f.choose("How is it reached?", Reaches, &a.Reach)
 }
 
-func askID(a *settings.Settings, open func(url string)) error {
+func (f form) askID(a *settings.Settings, open func(url string)) error {
 	if a.App.Slug == "" {
 		return nil
 	}
@@ -103,15 +121,11 @@ func askID(a *settings.Settings, open func(url string)) error {
 	} else {
 		open(SettingsPage(a.App.Slug))
 	}
-	if err := run(huh.NewGroup(
+	if err := f.run(huh.NewGroup(
 		huh.NewInput().Title(Title("Your app's App ID, shown on "+SettingsPage(a.App.Slug), now) + skip(now)).Validate(appID(now)).Value(&id),
 	)); err != nil {
 		return err
 	}
 	a.App.ID = KeepID(id, a.App.ID)
 	return nil
-}
-
-func run(group *huh.Group) error {
-	return huh.NewForm(group).WithAccessible(true).Run()
 }
