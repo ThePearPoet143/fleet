@@ -10,3 +10,5 @@ their own settings; this repo holds no one's personal details.
 - Every check the doctor runs is a function with tests fed sample output; a fix is a failing test first.
 - Detect what you can (the system, installed tools); ask only the rest, and every question has a flag.
 - Run every change on a real host before asking for review.
+- Don't stack PRs. After one merges, open the next from a fresh branch off `dev` with only its own commits, and close
+  the old one.
