@@ -106,6 +106,9 @@ func Answers(current settings.Settings, f Flags, d Detected) settings.Settings {
 		slug, from = a.App.Slug, ""
 	}
 	out.App.Slug = DeriveApp(slug, from, out.GitHub.User)
+	if !f.Set["app-id"] && !strings.EqualFold(out.App.Slug, current.App.Slug) {
+		out.App.ID = 0
+	}
 	return out
 }
 
@@ -148,6 +151,16 @@ func AppID(text string) (int64, error) {
 	return id, nil
 }
 
+func KeepID(typed string, now int64) int64 {
+	if strings.TrimSpace(typed) == "" {
+		return now
+	}
+	if id, err := AppID(typed); err == nil {
+		return id
+	}
+	return now
+}
+
 func Check(s, current settings.Settings, user Lookup) (settings.Settings, error) {
 	var errs []error
 	if !known(Purposes, s.Purpose) {
@@ -167,7 +180,11 @@ func Check(s, current settings.Settings, user Lookup) (settings.Settings, error)
 	if s.GitHub.User == "" {
 		errs = append(errs, errors.New("GitHub user: needed (--github-user)"))
 	} else if login, err := user(s.GitHub.User); err != nil {
-		errs, s.GitHub.User = append(errs, err), current.GitHub.User
+		errs = append(errs, err)
+		if strings.EqualFold(s.App.Slug, s.GitHub.User+"-agents") {
+			s.App = current.App
+		}
+		s.GitHub.User = current.GitHub.User
 	} else {
 		s.GitHub.User = login
 	}

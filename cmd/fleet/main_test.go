@@ -54,7 +54,7 @@ func TestSetupRerunKeepsCurrentAnswers(t *testing.T) {
 func TestSetupKeepsValidAnswersWhenOneFails(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	code := setupCmd([]string{"--github-user", "nobody", "--app-id", "42", "--purpose", "laptop"}, dir, false, setup.Detected{}, fake, &out, &errOut)
+	code := setupCmd([]string{"--github-user", "nobody", "--app", "bots", "--app-id", "42", "--purpose", "laptop"}, dir, false, setup.Detected{}, fake, &out, &errOut)
 	if code != 1 || !strings.Contains(errOut.String(), `no GitHub account "nobody"`) {
 		t.Fatalf("setup = %d, %q", code, errOut.String())
 	}

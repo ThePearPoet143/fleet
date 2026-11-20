@@ -184,3 +184,51 @@ func TestADerivedAppFollowsANewUsernameWhateverItsCase(t *testing.T) {
 		t.Errorf("DeriveApp = %q; want other-agents", got)
 	}
 }
+
+func TestARejectedUsernameLeavesTheAppAsItWas(t *testing.T) {
+	current := settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.GitHub{User: "octocat"}, App: settings.App{ID: 42, Slug: "octocat-agents"}}
+	s := current
+	s.GitHub.User, s.App.Slug = "nobody", "nobody-agents"
+	a, err := Check(s, current, lookup)
+	if err == nil || a.GitHub.User != "octocat" || a.App.Slug != "octocat-agents" || a.App.ID != 42 {
+		t.Fatalf("Check = %+v, %v; want the old user and app", a, err)
+	}
+}
+
+func TestANewAppNeedsItsOwnID(t *testing.T) {
+	current := settings.Settings{Purpose: "host", GitHub: settings.GitHub{User: "a"}, App: settings.App{ID: 42, Slug: "a-agents"}}
+	for _, args := range [][]string{{"--app", "b-agents"}, {"--github-user", "b"}} {
+		f, _ := Parse(args)
+		if a := Answers(current, f, found); a.App.ID != 0 {
+			t.Errorf("%v kept ID %d for app %s", args, a.App.ID, a.App.Slug)
+		}
+	}
+	same, _ := Parse([]string{"--app", "A-Agents"})
+	if a := Answers(current, same, found); a.App.ID != 42 {
+		t.Errorf("the same app in other case lost its ID")
+	}
+	withID, _ := Parse([]string{"--app", "b-agents", "--app-id", "7"})
+	if a := Answers(current, withID, found); a.App.ID != 7 {
+		t.Errorf("--app-id with a new app = %d", a.App.ID)
+	}
+}
+
+func TestAnAnswerThatFailsKeepsTheSavedID(t *testing.T) {
+	for typed, want := range map[string]int64{"abc": 42, "": 42, "7": 7} {
+		if got := KeepID(typed, 42); got != want {
+			t.Errorf("KeepID(%q, 42) = %d; want %d", typed, got, want)
+		}
+	}
+}
+
+func TestEnterSkipsAGitHubQuestionSoTheRestIsSaved(t *testing.T) {
+	if err := appID("")(""); err != nil {
+		t.Errorf("an empty App ID on a first run: %v", err)
+	}
+	if err := onGitHub("", lookup)(""); err != nil {
+		t.Errorf("an empty username on a first run: %v", err)
+	}
+	if err := onGitHub("", lookup)("nobody"); err == nil {
+		t.Error("an unknown username passed")
+	}
+}
