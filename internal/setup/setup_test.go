@@ -122,3 +122,9 @@ func TestParseRefusesAChoiceTheFormCannotShow(t *testing.T) {
 		}
 	}
 }
+
+func TestADerivedAppFollowsANewUsernameWhateverItsCase(t *testing.T) {
+	if got := DeriveApp("someone-agents", "Someone", "other"); got != "other-agents" {
+		t.Errorf("DeriveApp = %q; want other-agents", got)
+	}
+}

@@ -29,6 +29,7 @@ type GitHub struct {
 }
 
 type App struct {
+	ID   int64  `toml:"id,omitzero"`
 	Slug string `toml:"slug,omitempty"`
 	Key  string `toml:"key,omitempty"`
 }
