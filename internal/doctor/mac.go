@@ -1,10 +1,18 @@
 // https://pkg.go.dev/os/exec#LookPath
 // https://pkg.go.dev/os/exec#Cmd.Output
+// https://pkg.go.dev/os/exec#Cmd.CombinedOutput
+// https://pkg.go.dev/os#Readlink
 package doctor
 
 import (
+	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 )
 
 func find(name string) string {
@@ -17,12 +25,31 @@ func output(name string, args ...string) string {
 	return string(out)
 }
 
+func combined(name string, args ...string) string {
+	out, _ := exec.Command(name, args...).CombinedOutput()
+	return string(out)
+}
+
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-func Mac() []Check {
+func read(path string) string {
+	text, _ := os.ReadFile(path)
+	return string(text)
+}
+
+func statusCode(url string) int {
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Get(url)
+	if err != nil {
+		return 0
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+func Mac(home, githubUser string) []Check {
 	checks := []Check{
 		Tool("Homebrew", find("brew"), "see https://brew.sh"),
 		Tool("git", find("git"), "xcode-select --install"),
@@ -36,5 +63,50 @@ func Mac() []Check {
 	} else {
 		checks = append(checks, Check{"Tailscale up", false, "install Tailscale: https://tailscale.com/download/mac"})
 	}
-	return append(checks, NoSleep(output("pmset", "-g")))
+	if find("t3") != "" {
+		env := read(filepath.Join(home, ".t3", "service.env"))
+		port := T3Port(env)
+		checks = append(checks,
+			T3Service(combined("t3", "service", "status")),
+			T3Network(combined("t3", "status")),
+			T3Answers(statusCode(fmt.Sprintf("http://127.0.0.1:%d/", port)), port),
+			AgentEnv(env))
+	}
+	checks = append(checks, token(home, githubUser), NoSleep(output("pmset", "-g")))
+	return append(checks, devFolder(home), sharedRules(home))
+}
+
+func token(home, githubUser string) Check {
+	if githubUser == "" {
+		return Check{"agents' GitHub token fresh (no GitHub user in settings)", false, "fleet setup"}
+	}
+	info, err := os.Stat(filepath.Join(home, ".people", githubUser, "agents", "gh", "hosts.yml"))
+	if err != nil {
+		return AgentToken(false, time.Now(), time.Now())
+	}
+	return AgentToken(true, info.ModTime(), time.Now())
+}
+
+func devFolder(home string) Check {
+	entries, err := os.ReadDir(filepath.Join(home, "dev"))
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return DevFolder(err == nil, names)
+}
+
+func sharedRules(home string) Check {
+	ci := filepath.Join(home, "dev", "ci")
+	behind := 1
+	if exists(ci) {
+		exec.Command("git", "-C", ci, "fetch", "-q", "origin", "dev").Run()
+		if n, err := strconv.Atoi(strings.TrimSpace(output("git", "-C", ci, "rev-list", "--count", "HEAD..origin/dev"))); err == nil {
+			behind = n
+		}
+	}
+	target, _ := os.Readlink(filepath.Join(home, ".codex", "AGENTS.md"))
+	return SharedRules(read(filepath.Join(home, ".claude", "CLAUDE.md")), target, filepath.Join(ci, "agents", "rules.md"), behind)
 }
