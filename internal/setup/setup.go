@@ -109,6 +109,9 @@ func Answers(current settings.Settings, f Flags, d Detected) settings.Settings {
 	if !f.Set["app-id"] && !strings.EqualFold(out.App.Slug, current.App.Slug) {
 		out.App.ID = 0
 	}
+	if out.App.ID == current.App.ID && strings.EqualFold(out.App.Slug, current.App.Slug) {
+		out.App.Installation = current.App.Installation
+	}
 	return out
 }
 

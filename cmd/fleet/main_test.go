@@ -196,7 +196,7 @@ func TestSetupWaitsForTheAppToBeInstalled(t *testing.T) {
 	dir := t.TempDir()
 	key, _ := keyed(t)
 	gh, calls := installed(2)
-	installWait, installEvery = time.Second, time.Millisecond
+	waitForInstall(t, time.Second)
 	var out, errOut bytes.Buffer
 	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
 	if s, _, _ := settings.Load(settings.Path(dir)); code != 0 || s.App.Installation != 99 || *calls != 3 || !strings.Contains(out.String(), "Install App") {
@@ -244,5 +244,38 @@ func TestAKeyTakenThisRunIsKeptWhenSignInFails(t *testing.T) {
 	s, _, _ := settings.Load(settings.Path(dir))
 	if code != 1 || s.App.Key != filepath.Join(dir, "fleet", "someone-agents.2026-11-20.private-key.pem") {
 		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s.App)
+	}
+}
+
+func waitForInstall(t *testing.T, wait time.Duration) {
+	oldWait, oldEvery := installWait, installEvery
+	installWait, installEvery = wait, time.Millisecond
+	t.Cleanup(func() { installWait, installEvery = oldWait, oldEvery })
+}
+
+func TestABriefErrorWhileWaitingIsRetried(t *testing.T) {
+	waitForInstall(t, time.Second)
+	calls := 0
+	gh := setup.GitHub{Installation: func(string, int64, string) (int64, error) {
+		calls++
+		switch calls {
+		case 1:
+			return 0, github.ErrNotInstalled
+		case 2:
+			return 0, errors.New("GitHub answered 502 Bad Gateway")
+		}
+		return 99, nil
+	}}
+	a := settings.Settings{GitHub: settings.GitHub{User: "someone"}, App: settings.App{ID: 42, Slug: "s", Key: "/k.pem"}}
+	if err := install(&a, gh, true, &bytes.Buffer{}); err != nil || a.App.Installation != 99 {
+		t.Fatalf("install = %v, %+v", err, a.App)
+	}
+}
+
+func TestAnErrorOtherThanNotInstalledKeepsTheSavedInstallation(t *testing.T) {
+	gh := setup.GitHub{Installation: func(string, int64, string) (int64, error) { return 0, errors.New("timeout") }}
+	a := settings.Settings{GitHub: settings.GitHub{User: "someone"}, App: settings.App{ID: 42, Installation: 99, Slug: "s", Key: "/k.pem"}}
+	if err := install(&a, gh, false, &bytes.Buffer{}); err == nil || a.App.Installation != 99 {
+		t.Fatalf("install = %v, %+v", err, a.App)
 	}
 }

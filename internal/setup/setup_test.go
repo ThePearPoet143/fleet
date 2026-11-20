@@ -275,3 +275,15 @@ func TestSigningInAsTheAppPasses(t *testing.T) {
 		t.Fatalf("Check = %+v, %v; want GitHub's spelling of the app", a, err)
 	}
 }
+
+func TestARerunKeepsTheInstallationOnlyForTheSameApp(t *testing.T) {
+	current := settings.Settings{Purpose: "host", GitHub: settings.GitHub{User: "a"}, App: settings.App{ID: 42, Installation: 99, Slug: "a-agents"}}
+	f, _ := Parse(nil)
+	if a := Answers(current, f, found); a.App.Installation != 99 {
+		t.Errorf("rerun lost the installation: %+v", a.App)
+	}
+	other, _ := Parse([]string{"--app-id", "7"})
+	if a := Answers(current, other, found); a.App.Installation != 0 {
+		t.Errorf("a new App ID kept the old installation: %+v", a.App)
+	}
+}
