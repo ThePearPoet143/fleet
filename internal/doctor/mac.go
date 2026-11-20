@@ -2,6 +2,7 @@
 // https://pkg.go.dev/os/exec#Cmd.Output
 // https://pkg.go.dev/os/exec#Cmd.CombinedOutput
 // https://pkg.go.dev/os#Readlink
+// https://pkg.go.dev/os#Stat
 package doctor
 
 import (
@@ -88,10 +89,11 @@ func token(home, githubUser string) Check {
 }
 
 func devFolder(home string) Check {
-	entries, err := os.ReadDir(filepath.Join(home, "dev"))
+	dev := filepath.Join(home, "dev")
+	entries, err := os.ReadDir(dev)
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if info, statErr := os.Stat(filepath.Join(dev, e.Name())); statErr == nil && info.IsDir() {
 			names = append(names, e.Name())
 		}
 	}
