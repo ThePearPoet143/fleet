@@ -1,0 +1,18 @@
+# ci's checks report: https://github.com/ThePearPoet143/ci
+name: report
+
+on:
+  workflow_run:
+    workflows: [ci, tests]
+    types: [completed]
+
+permissions:
+  contents: read
+  checks: read
+  statuses: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  report:
+    uses: ThePearPoet143/ci/.github/workflows/report.yml@v0.7.0
