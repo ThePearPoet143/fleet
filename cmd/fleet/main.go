@@ -90,14 +90,19 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 
 func signIn(c *github.Client) setup.SignedApp {
 	return func(key string, id int64) (string, string, error) {
-		info, err := os.Stat(key)
+		f, err := os.Open(key)
+		if err != nil {
+			return "", "", err
+		}
+		defer f.Close()
+		info, err := f.Stat()
 		if err != nil {
 			return "", "", err
 		}
 		if info.Mode().Perm()&0o077 != 0 {
 			return "", "", fmt.Errorf("others can read it; run chmod 600 %s", key)
 		}
-		pemBytes, err := os.ReadFile(key)
+		pemBytes, err := io.ReadAll(f)
 		if err != nil {
 			return "", "", err
 		}

@@ -258,9 +258,13 @@ func TestSigningInAsTheAppCatchesAnotherOwnerAndABadKey(t *testing.T) {
 	if _, err := Check(s, settings.Settings{}, GitHub{lookup, signedAs("bots", "other")}); err == nil || !strings.Contains(err.Error(), `owned by "other"`) {
 		t.Errorf("other owner: %v", err)
 	}
+	if _, err := Check(s, settings.Settings{}, GitHub{lookup, signedAs("bots", "")}); err == nil || !strings.Contains(err.Error(), "your own account") {
+		t.Errorf("enterprise owner: %v", err)
+	}
 	s.App.Key = "/keys/broken.pem"
-	if a, err := Check(s, settings.Settings{}, GitHub{lookup, signedAs("bots", "Someone")}); err == nil || a.App.Key != "" {
-		t.Errorf("broken key = %+v, %v; want it refused and not saved", a, err)
+	saved := settings.Settings{App: settings.App{ID: 7, Slug: "old", Key: "/keys/old.pem"}}
+	if a, err := Check(s, saved, GitHub{lookup, signedAs("bots", "Someone")}); err == nil || a.App != saved.App {
+		t.Errorf("broken key = %+v, %v; want the saved app kept whole", a.App, err)
 	}
 }
 

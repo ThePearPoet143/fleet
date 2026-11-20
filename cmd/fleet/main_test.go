@@ -94,12 +94,16 @@ func TestABadPipedAnswerFailsButKeepsTheAnswersBeforeIt(t *testing.T) {
 
 func TestSignInRefusesAKeyOthersCanRead(t *testing.T) {
 	key := filepath.Join(t.TempDir(), "a.pem")
-	os.WriteFile(key, []byte("not a key"), 0o644)
+	if err := os.WriteFile(key, []byte("not a key"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := signIn(nil)(key, 42); err == nil || !strings.Contains(err.Error(), "chmod 600") {
 		t.Fatalf("readable key: %v", err)
 	}
-	os.Chmod(key, 0o600)
-	if _, _, err := signIn(nil)(key, 42); err == nil || strings.Contains(err.Error(), "not a key") {
+	if err := os.Chmod(key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := signIn(nil)(key, 42); err == nil || err.Error() != "the key isn't a PEM file" {
 		t.Fatalf("broken key: %v", err)
 	}
 }

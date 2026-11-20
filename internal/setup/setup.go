@@ -218,12 +218,10 @@ func signIn(s *settings.Settings, current settings.Settings, app SignedApp) erro
 	switch {
 	case err != nil:
 		err = fmt.Errorf("signing in as the app with %s: %w", s.App.Key, err)
-		s.App.Key = current.App.Key
-		return err
 	case !strings.EqualFold(slug, s.App.Slug):
 		err = fmt.Errorf("App ID %d is %q, not %q: check the App ID or the app's name", s.App.ID, slug, s.App.Slug)
 	case !strings.EqualFold(owner, s.GitHub.User):
-		err = fmt.Errorf("the app %q is owned by %q, not %q", slug, owner, s.GitHub.User)
+		err = fmt.Errorf("the app %q is owned by %q, not %q: fleet works with an app owned by your own account", slug, owner, s.GitHub.User)
 	default:
 		s.App.Slug = slug
 		return nil
