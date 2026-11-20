@@ -179,11 +179,15 @@ func install(a *settings.Settings, gh setup.GitHub, wait bool, out io.Writer) er
 			a.App.Installation = id
 			return nil
 		}
-		a.App.Installation = 0
+		late := !wait || time.Now().After(deadline)
 		if !errors.Is(err, github.ErrNotInstalled) {
-			return err
+			if late || !asked {
+				return err
+			}
+			continue
 		}
-		if !wait || time.Now().After(deadline) {
+		a.App.Installation = 0
+		if late {
 			return fmt.Errorf("the app isn't installed on your account: on %s, click Install App, then rerun setup", page)
 		}
 		if !asked {
