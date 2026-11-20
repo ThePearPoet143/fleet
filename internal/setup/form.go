@@ -2,6 +2,9 @@
 package setup
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -60,40 +63,90 @@ func appID(now string) func(string) error {
 	}
 }
 
-func Ask(a *settings.Settings, user Lookup, open func(url string)) error {
+type form struct {
+	in  *Lines
+	out io.Writer
+}
+
+func number(low, high int) func(string) error {
+	return func(s string) error {
+		if s == "" {
+			return nil
+		}
+		if n, err := strconv.Atoi(s); err != nil || n < low || n > high {
+			return fmt.Errorf("not a number from %d to %d", low, high)
+		}
+		return nil
+	}
+}
+
+func (f form) ask(field huh.Field, check func(string) error, emptyAs string) (err error) {
+	f.in.Check, f.in.EmptyAs = check, emptyAs
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("no valid answer was given")
+		}
+		if err == nil {
+			err = f.in.Err
+		}
+	}()
+	return huh.NewForm(huh.NewGroup(field)).WithAccessible(true).WithInput(f.in).WithOutput(f.out).Run()
+}
+
+func (f form) pick(title, now string, list []Option, value *string) error {
+	field := huh.NewSelect[string]().Title(Title(title, now)).Options(options(list)...).Value(value)
+	return f.ask(field, number(1, len(list)), "")
+}
+
+func (f form) choose(title string, list []Option, value *[]string) error {
+	field := huh.NewMultiSelect[string]().Title(title + " (Enter confirms)").Options(options(list)...).Value(value)
+	return f.ask(field, number(0, len(list)), "0")
+}
+
+func (f form) text(title string, check func(string) error, value *string) error {
+	field := huh.NewInput().Title(title).Value(value)
+	if check != nil {
+		field.Validate(check)
+	}
+	return f.ask(field, check, "")
+}
+
+func Ask(a *settings.Settings, user Lookup, open func(url string), in io.Reader, out io.Writer, strict bool) error {
+	f := form{NewLines(in), out}
+	f.in.Strict = strict
 	name, app := "", ""
 	oldUser, oldSlug := a.GitHub.User, a.App.Slug
-	if err := run(huh.NewGroup(
-		huh.NewSelect[string]().Title(Title("What is this machine for?", a.Purpose)).Options(options(Purposes)...).Value(&a.Purpose),
-		huh.NewSelect[string]().Title(Title("Is it personal or shared?", a.Use)).Options(options(Uses)...).Value(&a.Use),
-		huh.NewInput().Title(Title("Your GitHub username", a.GitHub.User)+skip(a.GitHub.User)).Validate(onGitHub(a.GitHub.User, user)).Value(&name),
-	)); err != nil {
+	if err := f.pick("What is this machine for?", a.Purpose, Purposes, &a.Purpose); err != nil {
+		return err
+	}
+	if err := f.pick("Is it personal or shared?", a.Use, Uses, &a.Use); err != nil {
+		return err
+	}
+	if err := f.text(Title("Your GitHub username", a.GitHub.User)+skip(a.GitHub.User), onGitHub(a.GitHub.User, user), &name); err != nil {
 		return err
 	}
 	a.GitHub.User = Keep(name, a.GitHub.User)
 	a.App.Slug = DeriveApp(a.App.Slug, oldUser, a.GitHub.User)
-	if err := run(huh.NewGroup(
-		huh.NewInput().Title(Title("Your agents' GitHub App, as in its URL", a.App.Slug)).Value(&app),
-		huh.NewMultiSelect[string]().Title("AI tools on this machine").Options(options(Tools)...).Value(&a.Tools),
-	)); err != nil {
+	if err := f.text(Title("Your agents' GitHub App, as in its URL", a.App.Slug), nil, &app); err != nil {
+		return err
+	}
+	if err := f.choose("AI tools on this machine", Tools, &a.Tools); err != nil {
 		return err
 	}
 	a.App.Slug = Keep(app, a.App.Slug)
 	if !strings.EqualFold(a.App.Slug, oldSlug) {
 		a.App.ID = 0
 	}
-	if err := askID(a, open); err != nil {
+	if err := f.askID(a, open); err != nil {
 		return err
 	}
 	if a.Use == "shared" {
 		return nil
 	}
-	return run(huh.NewGroup(
-		huh.NewMultiSelect[string]().Title("How is it reached?").Options(options(Reaches)...).Value(&a.Reach),
-	))
+	return f.choose("How is it reached?", Reaches, &a.Reach)
 }
 
-func askID(a *settings.Settings, open func(url string)) error {
+func (f form) askID(a *settings.Settings, open func(url string)) error {
 	if a.App.Slug == "" {
 		return nil
 	}
@@ -103,15 +156,10 @@ func askID(a *settings.Settings, open func(url string)) error {
 	} else {
 		open(SettingsPage(a.App.Slug))
 	}
-	if err := run(huh.NewGroup(
-		huh.NewInput().Title(Title("Your app's App ID, shown on "+SettingsPage(a.App.Slug), now) + skip(now)).Validate(appID(now)).Value(&id),
-	)); err != nil {
+	title := Title("Your app's App ID, shown on "+SettingsPage(a.App.Slug), now) + skip(now)
+	if err := f.text(title, appID(now), &id); err != nil {
 		return err
 	}
 	a.App.ID = KeepID(id, a.App.ID)
 	return nil
-}
-
-func run(group *huh.Group) error {
-	return huh.NewForm(group).WithAccessible(true).Run()
 }

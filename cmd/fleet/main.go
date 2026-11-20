@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,11 @@ import (
 
 const usage = "usage: fleet doctor | fleet setup [--purpose host|laptop] [--use personal|shared] [--github-user name]\n" +
 	"  [--app slug] [--app-id n] [--tools claude,codex] [--reach tailscale,t3,ssh] [--key /full/path.pem] [--yes]"
+
+var (
+	open  = func(url string) {}
+	piped = true
+)
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -39,16 +45,18 @@ func run(args []string, out, errOut io.Writer) int {
 			fmt.Fprintln(errOut, "fleet setup:", err)
 			return 2
 		}
-		info, _ := os.Stdin.Stat()
-		interactive := info != nil && info.Mode()&os.ModeCharDevice != 0
-		if code := setupCmd(args[1:], dir, interactive, setup.Detect(), github.New().User, out, errOut); code != 0 {
+		if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+			open = func(url string) { _ = exec.Command("open", url).Start() }
+			piped = false
+		}
+		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), github.New().User, out, errOut); code != 0 {
 			return code
 		}
 	}
 	return doctorCmd(out, errOut)
 }
 
-func setupCmd(args []string, configDir string, interactive bool, found setup.Detected, user setup.Lookup, out, errOut io.Writer) int {
+func setupCmd(args []string, configDir string, in io.Reader, found setup.Detected, user setup.Lookup, out, errOut io.Writer) int {
 	f, err := setup.Parse(args)
 	if err != nil {
 		fmt.Fprintf(errOut, "fleet setup: %v\n%s\n", err, usage)
@@ -61,14 +69,12 @@ func setupCmd(args []string, configDir string, interactive bool, found setup.Det
 		return 2
 	}
 	answers := setup.Answers(current, f, found)
-	if interactive && !f.Yes {
-		open := func(url string) { _ = exec.Command("open", url).Start() }
-		if err := setup.Ask(&answers, user, open); err != nil {
-			fmt.Fprintln(errOut, "fleet setup:", err)
-			return 1
-		}
+	var askErr error
+	if !f.Yes {
+		askErr = setup.Ask(&answers, user, open, in, out, piped)
 	}
 	answers, checkErr := setup.Check(answers, current, user)
+	checkErr = errors.Join(askErr, checkErr)
 	if err := settings.Save(path, answers); err != nil {
 		fmt.Fprintln(errOut, "fleet setup:", err)
 		return 1
