@@ -139,6 +139,13 @@ func choices(s settings.Settings) []error {
 
 type Lookup func(name string) (string, error)
 
+type SignedApp func(key string, id int64) (slug, owner string, err error)
+
+type GitHub struct {
+	User Lookup
+	App  SignedApp
+}
+
 func SettingsPage(slug string) string {
 	return "https://github.com/settings/apps/" + url.PathEscape(slug)
 }
@@ -161,7 +168,7 @@ func KeepID(typed string, now int64) int64 {
 	return now
 }
 
-func Check(s, current settings.Settings, user Lookup) (settings.Settings, error) {
+func Check(s, current settings.Settings, gh GitHub) (settings.Settings, error) {
 	var errs []error
 	if !known(Purposes, s.Purpose) {
 		errs = append(errs, fmt.Errorf("purpose %q: use host or laptop", s.Purpose))
@@ -179,7 +186,7 @@ func Check(s, current settings.Settings, user Lookup) (settings.Settings, error)
 	}
 	if s.GitHub.User == "" {
 		errs = append(errs, errors.New("GitHub user: needed (--github-user)"))
-	} else if login, err := user(s.GitHub.User); err != nil {
+	} else if login, err := gh.User(s.GitHub.User); err != nil {
 		errs = append(errs, err)
 		if strings.EqualFold(s.App.Slug, s.GitHub.User+"-agents") {
 			s.App = current.App
@@ -195,9 +202,32 @@ func Check(s, current settings.Settings, user Lookup) (settings.Settings, error)
 	}
 	if s.App.Key != "" && !filepath.IsAbs(s.App.Key) {
 		errs, s.App.Key = append(errs, fmt.Errorf("key %q: give its full path", s.App.Key)), current.App.Key
+	} else if s.App.Key != "" && s.App.ID > 0 && s.App.Slug != "" {
+		if err := signIn(&s, current, gh.App); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if s.Use == "shared" {
 		s.Reach = nil
 	}
 	return s, errors.Join(errs...)
+}
+
+func signIn(s *settings.Settings, current settings.Settings, app SignedApp) error {
+	slug, owner, err := app(s.App.Key, s.App.ID)
+	switch {
+	case err != nil:
+		err = fmt.Errorf("signing in as the app with %s: %w", s.App.Key, err)
+		s.App.Key = current.App.Key
+		return err
+	case !strings.EqualFold(slug, s.App.Slug):
+		err = fmt.Errorf("App ID %d is %q, not %q: check the App ID or the app's name", s.App.ID, slug, s.App.Slug)
+	case !strings.EqualFold(owner, s.GitHub.User):
+		err = fmt.Errorf("the app %q is owned by %q, not %q", slug, owner, s.GitHub.User)
+	default:
+		s.App.Slug = slug
+		return nil
+	}
+	s.App = current.App
+	return err
 }
