@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	"github.com/ThePearPoet143/fleet/internal/doctor"
+	"github.com/ThePearPoet143/fleet/internal/github"
 	"github.com/ThePearPoet143/fleet/internal/settings"
 	"github.com/ThePearPoet143/fleet/internal/setup"
 	"github.com/ThePearPoet143/fleet/internal/system"
@@ -16,6 +17,11 @@ import (
 
 const usage = "usage: fleet doctor | fleet setup [--purpose host|laptop] [--use personal|shared] [--github-user name]\n" +
 	"  [--app slug] [--tools claude,codex] [--reach tailscale,t3,ssh] [--key /full/path.pem] [--yes]"
+
+type GitHub interface {
+	User(name string) (string, error)
+	App(slug, owner string) (github.App, error)
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -38,14 +44,14 @@ func run(args []string, out, errOut io.Writer) int {
 		}
 		info, _ := os.Stdin.Stat()
 		interactive := info != nil && info.Mode()&os.ModeCharDevice != 0
-		if code := setupCmd(args[1:], dir, interactive, setup.Detect(), out, errOut); code != 0 {
+		if code := setupCmd(args[1:], dir, interactive, setup.Detect(), github.New(), out, errOut); code != 0 {
 			return code
 		}
 	}
 	return doctorCmd(out, errOut)
 }
 
-func setupCmd(args []string, configDir string, interactive bool, found setup.Detected, out, errOut io.Writer) int {
+func setupCmd(args []string, configDir string, interactive bool, found setup.Detected, gh GitHub, out, errOut io.Writer) int {
 	f, err := setup.Parse(args)
 	if err != nil {
 		fmt.Fprintf(errOut, "fleet setup: %v\n%s\n", err, usage)
@@ -66,6 +72,9 @@ func setupCmd(args []string, configDir string, interactive bool, found setup.Det
 	}
 	answers, err = setup.Finish(answers)
 	if err == nil {
+		answers, err = confirm(gh, answers, out)
+	}
+	if err == nil {
 		err = settings.Save(path, answers)
 	}
 	if err != nil {
@@ -74,6 +83,20 @@ func setupCmd(args []string, configDir string, interactive bool, found setup.Det
 	}
 	fmt.Fprintln(out, "saved", path)
 	return 0
+}
+
+func confirm(gh GitHub, s settings.Settings, out io.Writer) (settings.Settings, error) {
+	login, err := gh.User(s.GitHub.User)
+	if err != nil {
+		return s, err
+	}
+	app, err := gh.App(s.App.Slug, login)
+	if err != nil {
+		return s, err
+	}
+	s.GitHub.User, s.App.ID = login, app.ID
+	fmt.Fprintf(out, "GitHub account %s; agents' app %s (ID %d)\n", login, app.Name, app.ID)
+	return s, nil
 }
 
 func doctorCmd(out, errOut io.Writer) int {
