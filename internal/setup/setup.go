@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ThePearPoet143/fleet/internal/settings"
@@ -49,6 +51,7 @@ func Parse(args []string) (Flags, error) {
 	fs.StringVar(&a.Use, "use", "", "personal or shared")
 	fs.StringVar(&a.GitHub.User, "github-user", "", "your GitHub username")
 	fs.StringVar(&a.App.Slug, "app", "", "your agents' GitHub App, as in its URL")
+	fs.Int64Var(&a.App.ID, "app-id", 0, "your agents' App ID, shown on the app's settings page")
 	fs.StringVar(&a.App.Key, "key", "", "full path to this machine's app key (.pem)")
 	tools := fs.String("tools", "", "AI tools, comma-separated: claude, codex")
 	reach := fs.String("reach", "", "how it's reached, comma-separated: tailscale, t3, ssh")
@@ -61,7 +64,11 @@ func Parse(args []string) (Flags, error) {
 	}
 	fs.Visit(func(fl *flag.Flag) { f.Set[fl.Name] = true })
 	a.Tools, a.Reach = list(*tools), list(*reach)
-	return f, errors.Join(choices(*a)...)
+	errs := choices(*a)
+	if f.Set["app-id"] && a.App.ID <= 0 {
+		errs = append(errs, errors.New("--app-id: a positive number"))
+	}
+	return f, errors.Join(errs...)
 }
 
 func pick[T any](set bool, flag, current, fallback T, empty func(T) bool) T {
@@ -93,7 +100,7 @@ func Answers(current settings.Settings, f Flags, d Detected) settings.Settings {
 		GitHub:  settings.GitHub{User: pick(f.Set["github-user"], a.GitHub.User, current.GitHub.User, "", str)},
 	}
 	out.App.Key = pick(f.Set["key"], a.App.Key, current.App.Key, "", str)
-	out.App.ID = current.App.ID
+	out.App.ID = pick(f.Set["app-id"], a.App.ID, current.App.ID, 0, func(id int64) bool { return id == 0 })
 	slug, from := current.App.Slug, current.GitHub.User
 	if f.Set["app"] {
 		slug, from = a.App.Slug, ""
@@ -127,22 +134,50 @@ func choices(s settings.Settings) []error {
 	return errs
 }
 
-func Finish(s settings.Settings) (settings.Settings, error) {
-	errs := choices(s)
-	if s.Purpose == "" {
-		errs = append(errs, errors.New("purpose: needed (--purpose)"))
+type Lookup func(name string) (string, error)
+
+func SettingsPage(slug string) string {
+	return "https://github.com/settings/apps/" + url.PathEscape(slug)
+}
+
+func AppID(text string) (int64, error) {
+	id, err := strconv.ParseInt(strings.TrimSpace(text), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, errors.New("the App ID is a positive number")
 	}
-	if s.Use == "" {
-		errs = append(errs, errors.New("use: needed (--use)"))
+	return id, nil
+}
+
+func Check(s, current settings.Settings, user Lookup) (settings.Settings, error) {
+	var errs []error
+	if !known(Purposes, s.Purpose) {
+		errs = append(errs, fmt.Errorf("purpose %q: use host or laptop", s.Purpose))
+		s.Purpose = current.Purpose
+	}
+	if !known(Uses, s.Use) {
+		errs = append(errs, fmt.Errorf("use %q: use personal or shared", s.Use))
+		s.Use = current.Use
+	}
+	if bad := choices(settings.Settings{Tools: s.Tools}); bad != nil {
+		errs, s.Tools = append(errs, bad...), current.Tools
+	}
+	if bad := choices(settings.Settings{Reach: s.Reach}); bad != nil {
+		errs, s.Reach = append(errs, bad...), current.Reach
 	}
 	if s.GitHub.User == "" {
 		errs = append(errs, errors.New("GitHub user: needed (--github-user)"))
+	} else if login, err := user(s.GitHub.User); err != nil {
+		errs, s.GitHub.User = append(errs, err), current.GitHub.User
+	} else {
+		s.GitHub.User = login
 	}
 	if s.App.Slug == "" {
 		errs = append(errs, errors.New("app: needed (--app)"))
+	} else if s.App.ID <= 0 {
+		errs = append(errs, fmt.Errorf("App ID: needed (--app-id), shown on %s", SettingsPage(s.App.Slug)))
 	}
 	if s.App.Key != "" && !filepath.IsAbs(s.App.Key) {
-		errs = append(errs, fmt.Errorf("key %q: give its full path", s.App.Key))
+		errs, s.App.Key = append(errs, fmt.Errorf("key %q: give its full path", s.App.Key)), current.App.Key
 	}
 	if s.Use == "shared" {
 		s.Reach = nil

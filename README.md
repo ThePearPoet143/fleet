@@ -26,9 +26,11 @@ and Tailscale or T3 Code, and on a rerun shows each current answer, which Enter 
 reach it. Questions are plain prompts (huh's accessible mode), and each has a flag, so agents can run it unprompted:
 
 ```
-go run ./cmd/fleet setup --github-user <name> --tools claude,codex --yes
+go run ./cmd/fleet setup --github-user <name> --app-id <id> --tools claude,codex --yes
 ```
 
-It checks the username and the app on GitHub (public `GET /users/{name}` and `GET /apps/{slug}`, the app owned by
-you) and keeps the app's ID. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
+It checks each answer as you give it: the username on GitHub (public `GET /users/{name}`), at once. The app stays
+private, and GitHub hides a private app from a public lookup, so setup opens the app's settings page and asks for the
+App ID shown there, once (`--app-id`). If an answer fails, setup still saves the ones that passed, and a rerun offers
+them again. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
 app key's path (`--key`), never the key.

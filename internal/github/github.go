@@ -1,5 +1,4 @@
 // https://docs.github.com/en/rest/users/users#get-a-user
-// https://docs.github.com/en/rest/apps/apps#get-an-app
 // https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
 package github
 
@@ -15,11 +14,6 @@ import (
 type Client struct {
 	Base string
 	HTTP *http.Client
-}
-
-type App struct {
-	ID   int64
-	Name string
 }
 
 func New() *Client {
@@ -64,23 +58,4 @@ func (c *Client) User(name string) (string, error) {
 		return "", fmt.Errorf("GitHub gave no account for %q", name)
 	}
 	return user.Login, nil
-}
-
-func (c *Client) App(slug, owner string) (App, error) {
-	var app struct {
-		ID    int64
-		Name  string
-		Owner struct{ Login string }
-	}
-	missing := fmt.Sprintf("no GitHub App %q: make one first, then rerun setup", slug)
-	if err := c.get("apps", slug, missing, &app); err != nil {
-		return App{}, err
-	}
-	if app.ID == 0 {
-		return App{}, fmt.Errorf("GitHub gave no app for %q", slug)
-	}
-	if app.Owner.Login != owner {
-		return App{}, fmt.Errorf("the GitHub App %q is owned by %q, not %q", slug, app.Owner.Login, owner)
-	}
-	return App{app.ID, app.Name}, nil
 }
