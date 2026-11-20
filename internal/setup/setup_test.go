@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -48,20 +49,38 @@ func TestAnswersOnAFreshMachineUseWhatIsDetected(t *testing.T) {
 	}
 }
 
-func TestFinishKeepsNoReachOnASharedMachine(t *testing.T) {
-	a, err := Finish(settings.Settings{Purpose: "host", Use: "shared", GitHub: settings.GitHub{User: "someone"}, App: settings.App{Slug: "bots"}, Reach: []string{"tailscale"}})
+func lookup(name string) (string, error) {
+	if name == "nobody" {
+		return "", errors.New(`no GitHub account "nobody"`)
+	}
+	return strings.ToUpper(name[:1]) + name[1:], nil
+}
+
+var good = settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.GitHub{User: "someone"}, App: settings.App{ID: 42, Slug: "bots"}}
+
+func TestCheckKeepsNoReachOnASharedMachine(t *testing.T) {
+	shared := good
+	shared.Use, shared.Reach = "shared", []string{"tailscale"}
+	a, err := Check(shared, settings.Settings{}, lookup)
 	if err != nil || a.Reach != nil {
 		t.Fatalf("shared = %+v, %v; want no reach", a, err)
 	}
 }
 
-func TestFinishRefusesAnswersItCannotUse(t *testing.T) {
-	good := settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.GitHub{User: "someone"}, App: settings.App{Slug: "bots"}}
+func TestCheckSavesGitHubsSpellingOfTheUsername(t *testing.T) {
+	if a, err := Check(good, settings.Settings{}, lookup); err != nil || a.GitHub.User != "Someone" {
+		t.Fatalf("Check = %+v, %v", a, err)
+	}
+}
+
+func TestCheckRefusesAnswersItCannotUse(t *testing.T) {
 	cases := map[string]func(*settings.Settings){
 		"purpose":     func(s *settings.Settings) { s.Purpose = "server" },
 		"use":         func(s *settings.Settings) { s.Use = "family" },
 		"GitHub user": func(s *settings.Settings) { s.GitHub.User = "" },
+		"nobody":      func(s *settings.Settings) { s.GitHub.User = "nobody" },
 		"app":         func(s *settings.Settings) { s.App.Slug = "" },
+		"App ID":      func(s *settings.Settings) { s.App.ID = 0 },
 		"tools":       func(s *settings.Settings) { s.Tools = []string{"vim"} },
 		"reach":       func(s *settings.Settings) { s.Reach = []string{"carrier pigeon"} },
 		"key":         func(s *settings.Settings) { s.App.Key = "~/a.pem" },
@@ -69,12 +88,49 @@ func TestFinishRefusesAnswersItCannotUse(t *testing.T) {
 	for want, change := range cases {
 		s := good
 		change(&s)
-		if _, err := Finish(s); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("Finish with a bad %s: error %v", want, err)
+		if _, err := Check(s, settings.Settings{}, lookup); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Check with a bad %s: error %v", want, err)
 		}
 	}
-	if _, err := Finish(good); err != nil {
+	if _, err := Check(good, settings.Settings{}, lookup); err != nil {
 		t.Errorf("good answers refused: %v", err)
+	}
+}
+
+func TestCheckKeepsValidAnswersWhenOneFails(t *testing.T) {
+	current := settings.Settings{GitHub: settings.GitHub{User: "Old"}}
+	s := good
+	s.Purpose, s.GitHub.User = "laptop", "nobody"
+	a, err := Check(s, current, lookup)
+	if err == nil || a.Purpose != "laptop" || a.App.ID != 42 || a.GitHub.User != "Old" {
+		t.Fatalf("Check = %+v, %v; want the valid answers kept and the old user back", a, err)
+	}
+}
+
+func TestAppIDIsAPositiveNumber(t *testing.T) {
+	if id, err := AppID(" 42 "); err != nil || id != 42 {
+		t.Errorf("AppID(42) = %d, %v", id, err)
+	}
+	for _, bad := range []string{"", "0", "-3", "4x"} {
+		if _, err := AppID(bad); err == nil {
+			t.Errorf("AppID(%q) passed", bad)
+		}
+	}
+}
+
+func TestTheAppsSettingsPageShowsItsID(t *testing.T) {
+	if got := SettingsPage("someone-agents"); got != "https://github.com/settings/apps/someone-agents" {
+		t.Errorf("SettingsPage = %q", got)
+	}
+}
+
+func TestParseReadsTheAppID(t *testing.T) {
+	f, err := Parse([]string{"--app-id", "42"})
+	if err != nil || Answers(settings.Settings{}, f, found).App.ID != 42 {
+		t.Fatalf("--app-id 42: %+v, %v", f, err)
+	}
+	if _, err := Parse([]string{"--app-id", "0"}); err == nil {
+		t.Error("--app-id 0 passed")
 	}
 }
 
@@ -126,5 +182,53 @@ func TestParseRefusesAChoiceTheFormCannotShow(t *testing.T) {
 func TestADerivedAppFollowsANewUsernameWhateverItsCase(t *testing.T) {
 	if got := DeriveApp("someone-agents", "Someone", "other"); got != "other-agents" {
 		t.Errorf("DeriveApp = %q; want other-agents", got)
+	}
+}
+
+func TestARejectedUsernameLeavesTheAppAsItWas(t *testing.T) {
+	current := settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.GitHub{User: "octocat"}, App: settings.App{ID: 42, Slug: "octocat-agents"}}
+	s := current
+	s.GitHub.User, s.App.Slug = "nobody", "nobody-agents"
+	a, err := Check(s, current, lookup)
+	if err == nil || a.GitHub.User != "octocat" || a.App.Slug != "octocat-agents" || a.App.ID != 42 {
+		t.Fatalf("Check = %+v, %v; want the old user and app", a, err)
+	}
+}
+
+func TestANewAppNeedsItsOwnID(t *testing.T) {
+	current := settings.Settings{Purpose: "host", GitHub: settings.GitHub{User: "a"}, App: settings.App{ID: 42, Slug: "a-agents"}}
+	for _, args := range [][]string{{"--app", "b-agents"}, {"--github-user", "b"}} {
+		f, _ := Parse(args)
+		if a := Answers(current, f, found); a.App.ID != 0 {
+			t.Errorf("%v kept ID %d for app %s", args, a.App.ID, a.App.Slug)
+		}
+	}
+	same, _ := Parse([]string{"--app", "A-Agents"})
+	if a := Answers(current, same, found); a.App.ID != 42 {
+		t.Errorf("the same app in other case lost its ID")
+	}
+	withID, _ := Parse([]string{"--app", "b-agents", "--app-id", "7"})
+	if a := Answers(current, withID, found); a.App.ID != 7 {
+		t.Errorf("--app-id with a new app = %d", a.App.ID)
+	}
+}
+
+func TestAnAnswerThatFailsKeepsTheSavedID(t *testing.T) {
+	for typed, want := range map[string]int64{"abc": 42, "": 42, "7": 7} {
+		if got := KeepID(typed, 42); got != want {
+			t.Errorf("KeepID(%q, 42) = %d; want %d", typed, got, want)
+		}
+	}
+}
+
+func TestEnterSkipsAGitHubQuestionSoTheRestIsSaved(t *testing.T) {
+	if err := appID("")(""); err != nil {
+		t.Errorf("an empty App ID on a first run: %v", err)
+	}
+	if err := onGitHub("", lookup)(""); err != nil {
+		t.Errorf("an empty username on a first run: %v", err)
+	}
+	if err := onGitHub("", lookup)("nobody"); err == nil {
+		t.Error("an unknown username passed")
 	}
 }

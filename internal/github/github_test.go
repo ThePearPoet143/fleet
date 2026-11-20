@@ -20,17 +20,13 @@ func server(t *testing.T) *Client {
 		switch r.URL.Path {
 		case "/users/someone":
 			w.Write([]byte(`{"login":"Someone","type":"User"}`))
-		case "/apps/someone-agents":
-			w.Write([]byte(`{"id":42,"slug":"someone-agents","name":"someone-agents","owner":{"login":"Someone"}}`))
-		case "/apps/borrowed":
-			w.Write([]byte(`{"id":7,"slug":"borrowed","owner":{"login":"other"}}`))
 		case "/users/busy":
 			w.WriteHeader(http.StatusForbidden)
 		case "/users/limited":
 			w.Header().Set("X-Ratelimit-Remaining", "0")
 			w.Header().Set("X-Ratelimit-Reset", "1795000000")
 			w.WriteHeader(http.StatusTooManyRequests)
-		case "/users/root", "/apps/root":
+		case "/users/root":
 			w.Write([]byte(`{"current_user_url":"https://api.github.com/user"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -57,22 +53,6 @@ func TestUserSaysWhenNoSuchAccountExists(t *testing.T) {
 	}
 }
 
-func TestAppReturnsTheIDOfAnAppTheUserOwns(t *testing.T) {
-	app, err := server(t).App("someone-agents", "Someone")
-	if err != nil || app.ID != 42 || app.Name != "someone-agents" {
-		t.Fatalf("App = %+v, %v", app, err)
-	}
-}
-
-func TestAppRefusesAnAppSomeoneElseOwnsOrNoApp(t *testing.T) {
-	if _, err := server(t).App("borrowed", "Someone"); err == nil || !strings.Contains(err.Error(), `owned by "other"`) {
-		t.Errorf("borrowed error = %v", err)
-	}
-	if _, err := server(t).App("missing", "Someone"); err == nil || !strings.Contains(err.Error(), `no GitHub App "missing"`) {
-		t.Errorf("missing error = %v", err)
-	}
-}
-
 func TestNamesAreEscapedInThePath(t *testing.T) {
 	if _, err := server(t).User("someone/../apps/borrowed"); err == nil || asked != "/users/someone%2F..%2Fapps%2Fborrowed" {
 		t.Fatalf("asked %q, %v; want the name escaped", asked, err)
@@ -84,12 +64,9 @@ func TestNamesAreEscapedInThePath(t *testing.T) {
 	}
 }
 
-func TestAnAnswerWithNoAccountOrAppFails(t *testing.T) {
+func TestAnAnswerWithNoAccountFails(t *testing.T) {
 	if _, err := server(t).User("root"); err == nil {
 		t.Error("an answer with no login passed")
-	}
-	if _, err := server(t).App("root", ""); err == nil {
-		t.Error("an answer with no app ID passed")
 	}
 }
 
