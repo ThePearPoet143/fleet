@@ -44,3 +44,21 @@ func TestLoadRefusesKeysItDoesNotKnow(t *testing.T) {
 		t.Fatalf("Load error = %v; want it to name github.token", err)
 	}
 }
+
+func TestSaveWritesOnlyTheOwnersFileAndLoadsBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fleet", "settings.toml")
+	want := Settings{Purpose: "host", Use: "personal", Tools: []string{"claude"}, GitHub: GitHub{User: "someone"},
+		App: App{Slug: "someone-agents", Key: "/keys/agents.pem"}}
+	if err := Save(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := Load(path)
+	if err != nil || !found || got.App != want.App || got.GitHub != want.GitHub || got.Purpose != "host" || len(got.Tools) != 1 {
+		t.Fatalf("round trip = %+v, %v, %v; want %+v", got, found, err, want)
+	}
+	for p, mode := range map[string]os.FileMode{path: 0o600, filepath.Dir(path): 0o700 | os.ModeDir} {
+		if info, err := os.Stat(p); err != nil || info.Mode() != mode {
+			t.Errorf("%s mode = %v, %v; want %v", p, info.Mode(), err, mode)
+		}
+	}
+}
