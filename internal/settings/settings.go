@@ -18,8 +18,8 @@ import (
 type Settings struct {
 	Purpose string   `toml:"purpose,omitempty"`
 	Use     string   `toml:"use,omitempty"`
-	Tools   []string `toml:"tools,omitempty"`
-	Reach   []string `toml:"reach,omitempty"`
+	Tools   []string `toml:"tools"`
+	Reach   []string `toml:"reach"`
 	GitHub  GitHub   `toml:"github"`
 	App     App      `toml:"app"`
 }
@@ -70,6 +70,10 @@ func Save(path string, s Settings) error {
 	}
 	defer os.Remove(f.Name())
 	if err := toml.NewEncoder(f).Encode(s); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
 		f.Close()
 		return err
 	}

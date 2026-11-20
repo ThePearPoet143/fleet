@@ -43,27 +43,31 @@ func neededUnless(now string) func(string) error {
 
 func Ask(a *settings.Settings) error {
 	user, app := "", ""
-	appNow := a.App.Slug
-	if appNow == "" {
-		appNow = "<username>-agents"
+	oldUser := a.GitHub.User
+	if err := run(huh.NewGroup(
+		huh.NewSelect[string]().Title(Title("What is this machine for?", a.Purpose)).Options(options(Purposes)...).Value(&a.Purpose),
+		huh.NewSelect[string]().Title(Title("Is it personal or shared?", a.Use)).Options(options(Uses)...).Value(&a.Use),
+		huh.NewInput().Title(Title("Your GitHub username", a.GitHub.User)).Validate(neededUnless(a.GitHub.User)).Value(&user),
+	)); err != nil {
+		return err
 	}
-	err := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().Title(Title("What is this machine for?", a.Purpose)).Options(options(Purposes)...).Value(&a.Purpose),
-			huh.NewSelect[string]().Title(Title("Is it personal or shared?", a.Use)).Options(options(Uses)...).Value(&a.Use),
-			huh.NewInput().Title(Title("Your GitHub username", a.GitHub.User)).Validate(neededUnless(a.GitHub.User)).Value(&user),
-		),
-		huh.NewGroup(
-			huh.NewInput().Title(Title("Your agents' GitHub App, as in its URL", appNow)).Value(&app),
-			huh.NewMultiSelect[string]().Title("AI tools on this machine").Options(options(Tools)...).Value(&a.Tools),
-		),
-		huh.NewGroup(
-			huh.NewMultiSelect[string]().Title("How is it reached?").Options(options(Reaches)...).Value(&a.Reach),
-		).WithHideFunc(func() bool { return a.Use == "shared" }),
-	).WithAccessible(true).Run()
-	a.GitHub.User, a.App.Slug = Keep(user, a.GitHub.User), Keep(app, a.App.Slug)
-	if a.App.Slug == "" && a.GitHub.User != "" {
-		a.App.Slug = a.GitHub.User + "-agents"
+	a.GitHub.User = Keep(user, a.GitHub.User)
+	a.App.Slug = DeriveApp(a.App.Slug, oldUser, a.GitHub.User)
+	if err := run(huh.NewGroup(
+		huh.NewInput().Title(Title("Your agents' GitHub App, as in its URL", a.App.Slug)).Value(&app),
+		huh.NewMultiSelect[string]().Title("AI tools on this machine").Options(options(Tools)...).Value(&a.Tools),
+	)); err != nil {
+		return err
 	}
-	return err
+	a.App.Slug = Keep(app, a.App.Slug)
+	if a.Use == "shared" {
+		return nil
+	}
+	return run(huh.NewGroup(
+		huh.NewMultiSelect[string]().Title("How is it reached?").Options(options(Reaches)...).Value(&a.Reach),
+	))
+}
+
+func run(group *huh.Group) error {
+	return huh.NewForm(group).WithAccessible(true).Run()
 }

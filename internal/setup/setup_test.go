@@ -89,3 +89,36 @@ func TestARerunShowsEachCurrentAnswerAndEnterKeepsIt(t *testing.T) {
 		t.Error("Keep should keep the current answer on Enter and take a typed one")
 	}
 }
+
+func TestAnswersRememberChoosingNoToolsOrReach(t *testing.T) {
+	saved := settings.Settings{Purpose: "laptop", Use: "personal", GitHub: settings.GitHub{User: "someone"}, App: settings.App{Slug: "bots"}}
+	f, _ := Parse(nil)
+	if a := Answers(saved, f, found); a.Tools != nil || a.Reach != nil {
+		t.Fatalf("saved empty choices were refilled: %+v", a)
+	}
+}
+
+func TestADerivedAppFollowsANewUsernameAndAChosenOneStays(t *testing.T) {
+	derived := settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.GitHub{User: "alice"}, App: settings.App{Slug: "alice-agents"}}
+	f, _ := Parse([]string{"--github-user", "bob"})
+	if a := Answers(derived, f, found); a.App.Slug != "bob-agents" {
+		t.Errorf("derived app = %q; want bob-agents", a.App.Slug)
+	}
+	chosen := derived
+	chosen.App.Slug = "bots"
+	if a := Answers(chosen, f, found); a.App.Slug != "bots" {
+		t.Errorf("chosen app = %q; want bots", a.App.Slug)
+	}
+	empty, _ := Parse([]string{"--github-user", "bob", "--app", ""})
+	if a := Answers(chosen, empty, found); a.App.Slug != "bob-agents" {
+		t.Errorf("--app \"\" = %q; want bob-agents", a.App.Slug)
+	}
+}
+
+func TestParseRefusesAChoiceTheFormCannotShow(t *testing.T) {
+	for _, args := range [][]string{{"--purpose", "server"}, {"--use", "family"}, {"--tools", "vim"}, {"--reach", "pigeon"}} {
+		if _, err := Parse(args); err == nil {
+			t.Errorf("Parse(%v) accepted it", args)
+		}
+	}
+}
