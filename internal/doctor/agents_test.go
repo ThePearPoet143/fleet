@@ -67,3 +67,10 @@ func TestSharedRulesNamesEachGap(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentEnvTreatsAnEmptyValueAsMissingNotTheNextLine(t *testing.T) {
+	env := strings.Replace(goodEnv, "GIT_AUTHOR_EMAIL=1+someone-agents[bot]@users.noreply.github.com", "GIT_AUTHOR_EMAIL=", 1)
+	if c := AgentEnv(env); c.Pass || !strings.Contains(c.Name, "missing: GIT_AUTHOR_EMAIL)") {
+		t.Errorf("empty email = %+v", c)
+	}
+}

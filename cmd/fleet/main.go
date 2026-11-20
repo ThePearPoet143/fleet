@@ -37,7 +37,11 @@ func run(args []string, out, errOut io.Writer) int {
 		s = loaded
 		checks = append(checks, doctor.Settings(path, found, err))
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(errOut, "fleet doctor:", err)
+		return 2
+	}
 	checks = append(checks, doctor.Mac(home, s.GitHub.User)...)
 	return report(checks, out)
 }

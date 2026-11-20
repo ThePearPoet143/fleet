@@ -12,7 +12,7 @@ import (
 
 const RulesImport = "@~/dev/ci/agents/rules.md"
 
-var envLine = regexp.MustCompile(`(?m)^\s*([A-Z_]+)\s*=\s*(.*)$`)
+var envLine = regexp.MustCompile(`(?m)^[ \t]*([A-Z_]+)[ \t]*=[ \t]*(.*)$`)
 
 func AgentEnv(serviceEnv string) Check {
 	values := map[string]string{}

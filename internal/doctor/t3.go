@@ -16,7 +16,7 @@ var (
 	t3Behind    = regexp.MustCompile(`\[restart-pending\]|needs an update or repair`)
 	t3Next      = regexp.MustCompile("Next:\\s*Run\\s+`([^`]+)`")
 	t3Lan       = regexp.MustCompile(`(?m)^\s*Local network\s+on\b`)
-	t3Port      = regexp.MustCompile(`(?m)^\s*T3CODE_PORT\s*=\s*(\d+)`)
+	t3Port      = regexp.MustCompile(`(?m)^[ \t]*T3CODE_PORT[ \t]*=[ \t]*(\d+)`)
 )
 
 func T3Service(status string) Check {
