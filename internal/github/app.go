@@ -68,3 +68,8 @@ func (c *Client) App(jwt string) (App, error) {
 	}
 	return App{app.ID, app.Slug, app.Owner.Login}, nil
 }
+
+func CheckKey(pemBytes []byte) error {
+	_, err := privateKey(pemBytes)
+	return err
+}
