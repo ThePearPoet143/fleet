@@ -36,5 +36,7 @@ App ID shown there, once (`--app-id`). If an answer fails, setup still saves the
 them again. Each machine has its own app key, made only on the app's page (Credentials, Key pairs, New key). With no key yet,
 setup says where to click, waits up to five minutes for the new `.pem` in Downloads, and moves it next to settings,
 readable only by you. With a key (taken, or given as `--key`), it signs in as the app (`GET /app` with a JWT) and
-stops if the app's name or owner isn't what you answered. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
+stops if the app's name or owner isn't what you answered. Then it finds the app's installation on your account
+(`GET /users/{name}/installation`, signed as the app) and keeps its ID; if the app isn't installed yet, it says
+where to click Install App and waits. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
 app key's path (`--key`), never the key.
