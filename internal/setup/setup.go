@@ -93,6 +93,7 @@ func Answers(current settings.Settings, f Flags, d Detected) settings.Settings {
 		GitHub:  settings.GitHub{User: pick(f.Set["github-user"], a.GitHub.User, current.GitHub.User, "", str)},
 	}
 	out.App.Key = pick(f.Set["key"], a.App.Key, current.App.Key, "", str)
+	out.App.ID = current.App.ID
 	slug, from := current.App.Slug, current.GitHub.User
 	if f.Set["app"] {
 		slug, from = a.App.Slug, ""
