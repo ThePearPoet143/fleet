@@ -14,7 +14,7 @@ func ask(t *testing.T, a *settings.Settings, input string) (string, []string) {
 	t.Helper()
 	var out bytes.Buffer
 	var opened []string
-	if err := Ask(a, lookup, func(url string) { opened = append(opened, url) }, strings.NewReader(input), &out); err != nil {
+	if err := Ask(a, lookup, func(url string) { opened = append(opened, url) }, strings.NewReader(input), &out, true); err != nil {
 		t.Fatal(err)
 	}
 	return out.String(), opened
@@ -68,5 +68,37 @@ func TestTheEndOfInputKeepsEveryAnswer(t *testing.T) {
 	ask(t, &a, "")
 	if a.Purpose != "laptop" || a.GitHub.User != "octocat" || a.App.ID != 42 || !slices.Equal(a.Tools, []string{"codex"}) {
 		t.Fatalf("answers = %+v; want %+v", a, saved)
+	}
+}
+
+func askErr(a *settings.Settings, input string) error {
+	var out bytes.Buffer
+	return Ask(a, lookup, func(string) {}, strings.NewReader(input), &out, true)
+}
+
+func TestAPipedAnswerOutOfRangeFailsWithoutCrashing(t *testing.T) {
+	for _, input := range []string{"3", "x\n", "\n\n\n\n9\n"} {
+		a := settings.Settings{Purpose: "host", Use: "personal", GitHub: settings.GitHub{User: "octocat"}, App: settings.App{ID: 42, Slug: "octocat-agents"}}
+		if err := askErr(&a, input); err == nil || !strings.Contains(err.Error(), strings.TrimSpace(input[strings.LastIndex(strings.TrimSpace(input), "\n")+1:])) {
+			t.Errorf("input %q: error %v", input, err)
+		}
+	}
+}
+
+func TestARejectedPipedAnswerStopsInsteadOfShiftingTheRest(t *testing.T) {
+	a := settings.Settings{Purpose: "host", Use: "personal", App: settings.App{Slug: "kept"}}
+	err := askErr(&a, "1\n1\nnobody\n\nother-app\n")
+	if err == nil || !strings.Contains(err.Error(), "nobody") || a.App.Slug != "kept" {
+		t.Fatalf("err %v, slug %q", err, a.App.Slug)
+	}
+}
+
+func TestSpacesConfirmAListAndAnOverlongAnswerFails(t *testing.T) {
+	a := settings.Settings{Purpose: "host", Use: "personal", Tools: []string{"codex"}, GitHub: settings.GitHub{User: "octocat"}, App: settings.App{ID: 42, Slug: "octocat-agents"}}
+	if err := askErr(&a, "\n\n\n\n \n\n\n"); err != nil || !slices.Equal(a.Tools, []string{"codex"}) {
+		t.Errorf("spaces: %v, tools %v", err, a.Tools)
+	}
+	if err := askErr(&a, "\n\n\n"+strings.Repeat("a", 70000)+"\n"); err == nil || !strings.Contains(err.Error(), "too long") {
+		t.Errorf("long line: %v", err)
 	}
 }

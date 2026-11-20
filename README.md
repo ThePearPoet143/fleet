@@ -23,7 +23,8 @@ Each check is a function tested with sample output (`go test ./...`), on Linux i
 `fleet setup` asks what this machine is for, whether it's personal or shared, your GitHub username, your agents'
 GitHub App (`<username>-agents` unless you say otherwise), the AI tools on it and how it's reached. It detects the tools
 and Tailscale or T3 Code, and on a rerun shows each current answer, which Enter keeps. A shared machine stores no way to
-reach it. Questions are plain prompts (huh's accessible mode), and each has a flag, so agents can run it unprompted:
+reach it. Questions are plain prompts (huh's accessible mode), and each has a flag, so agents can run it unprompted with `--yes`. Without `--yes` it reads answers from standard input, one per
+line, so they can be piped in; a piped answer it can't use stops setup, which keeps the answers before it:
 
 ```
 go run ./cmd/fleet setup --github-user <name> --app-id <id> --tools claude,codex --yes

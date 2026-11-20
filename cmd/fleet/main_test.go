@@ -79,3 +79,13 @@ func TestPipedAnswersDriveTheForm(t *testing.T) {
 		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s)
 	}
 }
+
+func TestABadPipedAnswerFailsButKeepsTheAnswersBeforeIt(t *testing.T) {
+	dir := t.TempDir()
+	var out, errOut bytes.Buffer
+	code := setupCmd(nil, dir, strings.NewReader("2\n9\n"), setup.Detected{}, fake, &out, &errOut)
+	s, _, _ := settings.Load(settings.Path(dir))
+	if code != 1 || !strings.Contains(errOut.String(), `answer "9"`) || s.Purpose != "laptop" {
+		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s)
+	}
+}

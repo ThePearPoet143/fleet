@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,7 +21,10 @@ import (
 const usage = "usage: fleet doctor | fleet setup [--purpose host|laptop] [--use personal|shared] [--github-user name]\n" +
 	"  [--app slug] [--app-id n] [--tools claude,codex] [--reach tailscale,t3,ssh] [--key /full/path.pem] [--yes]"
 
-var open = func(url string) {}
+var (
+	open  = func(url string) {}
+	piped = true
+)
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -43,6 +47,7 @@ func run(args []string, out, errOut io.Writer) int {
 		}
 		if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
 			open = func(url string) { _ = exec.Command("open", url).Start() }
+			piped = false
 		}
 		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), github.New().User, out, errOut); code != 0 {
 			return code
@@ -64,13 +69,12 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		return 2
 	}
 	answers := setup.Answers(current, f, found)
+	var askErr error
 	if !f.Yes {
-		if err := setup.Ask(&answers, user, open, in, out); err != nil {
-			fmt.Fprintln(errOut, "fleet setup:", err)
-			return 1
-		}
+		askErr = setup.Ask(&answers, user, open, in, out, piped)
 	}
 	answers, checkErr := setup.Check(answers, current, user)
+	checkErr = errors.Join(askErr, checkErr)
 	if err := settings.Save(path, answers); err != nil {
 		fmt.Fprintln(errOut, "fleet setup:", err)
 		return 1
