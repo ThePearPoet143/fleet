@@ -215,20 +215,22 @@ func TestANewAppNeedsItsOwnID(t *testing.T) {
 
 func TestAnAnswerThatFailsKeepsTheSavedID(t *testing.T) {
 	for typed, want := range map[string]int64{"abc": 42, "": 42, "7": 7} {
-		if got := KeepID(typed, 42); got != want {
-			t.Errorf("KeepID(%q, 42) = %d; want %d", typed, got, want)
+		s := settings.Settings{App: settings.App{ID: 42}}
+		_ = stepFor("app-id").Set(&s, Keep(typed, "42"))
+		if got := s.App.ID; got != want {
+			t.Errorf("the App ID typed %q, now 42 = %d; want %d", typed, got, want)
 		}
 	}
 }
 
 func TestEnterSkipsAGitHubQuestionSoTheRestIsSaved(t *testing.T) {
-	if err := appID("")(""); err != nil {
+	if err := stepFor("app-id").typed("", lookup)(""); err != nil {
 		t.Errorf("an empty App ID on a first run: %v", err)
 	}
-	if err := onGitHub("", lookup)(""); err != nil {
+	if err := stepFor("github-user").typed("", lookup)(""); err != nil {
 		t.Errorf("an empty username on a first run: %v", err)
 	}
-	if err := onGitHub("", lookup)("nobody"); err == nil {
+	if err := stepFor("github-user").typed("", lookup)("nobody"); err == nil {
 		t.Error("an unknown username passed")
 	}
 }
