@@ -40,3 +40,14 @@ stops if the app's name or owner isn't what you answered. Then it finds the app'
 (`GET /users/{name}/installation`, signed as the app) and keeps its ID; if the app isn't installed yet, it says
 where to click Install App and waits. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
 app key's path (`--key`), never the key.
+
+## The agents' token
+
+`fleet token` signs in as the app with this machine's key and asks GitHub for an installation token
+(`POST /app/installations/{id}/access_tokens`), which lasts an hour. It writes gh's login for the bot,
+`fleet/gh/hosts.yml` next to settings, in one step and readable only by you; agents use that folder as
+`GH_CONFIG_DIR`. It prints when it refreshed, never the token, and on a failure keeps the old login.
+
+```
+go run ./cmd/fleet token
+```

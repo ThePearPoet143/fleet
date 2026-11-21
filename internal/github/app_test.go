@@ -103,3 +103,34 @@ func TestInstallationIsFoundSignedAsTheApp(t *testing.T) {
 		t.Fatalf("bad JWT: %v", err)
 	}
 }
+
+func TestTokenIsMadeSignedAsTheApp(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Header.Get("Authorization") != "Bearer good":
+			w.WriteHeader(http.StatusUnauthorized)
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/99/access_tokens":
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"token":"ghs_example","expires_at":"2026-11-20T13:00:00Z"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/7/access_tokens":
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"message":"no token"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer s.Close()
+	c := &Client{Base: s.URL, HTTP: s.Client()}
+	if token, err := c.Token("good", 99); err != nil || token != "ghs_example" {
+		t.Fatalf("Token = %q, %v", token, err)
+	}
+	if token, err := c.Token("good", 7); err == nil || token != "" {
+		t.Fatalf("no token in the answer = %q, %v", token, err)
+	}
+	if _, err := c.Token("bad", 99); err == nil || !strings.Contains(err.Error(), "401") {
+		t.Fatalf("bad JWT: %v", err)
+	}
+	if _, err := c.Token("good", 5); err == nil || !strings.Contains(err.Error(), "no installation 5") {
+		t.Fatalf("gone installation: %v", err)
+	}
+}

@@ -18,9 +18,10 @@ import (
 	"github.com/ThePearPoet143/fleet/internal/settings"
 	"github.com/ThePearPoet143/fleet/internal/setup"
 	"github.com/ThePearPoet143/fleet/internal/system"
+	"github.com/ThePearPoet143/fleet/internal/token"
 )
 
-const usage = "usage: fleet doctor | fleet setup [--purpose host|laptop] [--use personal|shared] [--github-user name]\n" +
+const usage = "usage: fleet doctor | fleet token | fleet setup [--purpose host|laptop] [--use personal|shared] [--github-user name]\n" +
 	"  [--app slug] [--app-id n] [--tools claude,codex] [--reach tailscale,t3,ssh] [--key /full/path.pem] [--yes]"
 
 var (
@@ -40,13 +41,21 @@ func main() {
 }
 
 func run(args []string, out, errOut io.Writer) int {
-	if len(args) == 0 || (args[0] != "doctor" && args[0] != "setup") || (args[0] == "doctor" && len(args) > 1) {
+	if len(args) == 0 || (args[0] != "doctor" && args[0] != "setup" && args[0] != "token") || (args[0] != "setup" && len(args) > 1) {
 		fmt.Fprintln(errOut, usage)
 		return 2
 	}
 	if _, err := system.Detect(runtime.GOOS); err != nil {
 		fmt.Fprintf(errOut, "fleet %s: %v\n", args[0], err)
 		return 2
+	}
+	if args[0] == "token" {
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			fmt.Fprintln(errOut, "fleet token:", err)
+			return 2
+		}
+		return tokenCmd(dir, issue(github.New()), out, errOut)
 	}
 	if args[0] == "setup" {
 		dir, err := os.UserConfigDir()
@@ -167,6 +176,39 @@ func installation(c *github.Client) func(string, int64, string) (int64, error) {
 	}
 }
 
+func issue(c *github.Client) func(string, int64, int64) (string, error) {
+	return func(key string, id, installation int64) (string, error) {
+		jwt, err := appJWT(key, id)
+		if err != nil {
+			return "", err
+		}
+		return c.Token(jwt, installation)
+	}
+}
+
+// tokenCmd refreshes the agents' gh login; it never prints the token.
+func tokenCmd(configDir string, issue func(key string, id, installation int64) (string, error), out, errOut io.Writer) int {
+	now := time.Now().Format(time.RFC3339)
+	s, found, err := settings.Load(settings.Path(configDir))
+	if err == nil && (!found || s.App.ID <= 0 || s.App.Installation <= 0 || s.App.Slug == "" || s.App.Key == "") {
+		err = errors.New("settings lack the app, its key or its installation; run fleet setup")
+	}
+	var t string
+	if err == nil {
+		t, err = issue(s.App.Key, s.App.ID, s.App.Installation)
+	}
+	dir := token.Dir(configDir)
+	if err == nil {
+		err = token.Write(dir, t, s.App.Slug)
+	}
+	if err != nil {
+		fmt.Fprintf(errOut, "%s fleet token failed: %v\n", now, err)
+		return 1
+	}
+	fmt.Fprintf(out, "%s token refreshed in %s\n", now, filepath.Join(dir, "hosts.yml"))
+	return 0
+}
+
 func install(a *settings.Settings, gh setup.GitHub, wait bool, out io.Writer) error {
 	if a.App.Key == "" || a.App.ID <= 0 || a.GitHub.User == "" || gh.Installation == nil {
 		return nil
@@ -200,6 +242,7 @@ func install(a *settings.Settings, gh setup.GitHub, wait bool, out io.Writer) er
 
 func doctorCmd(out, errOut io.Writer) int {
 	var s settings.Settings
+	hosts := ""
 	checks := []doctor.Check{}
 	if dir, err := os.UserConfigDir(); err != nil {
 		checks = append(checks, doctor.Settings("", false, err))
@@ -208,13 +251,16 @@ func doctorCmd(out, errOut io.Writer) int {
 		loaded, found, err := settings.Load(path)
 		s = loaded
 		checks = append(checks, doctor.Settings(path, found, err))
+		if s.App.Installation > 0 {
+			hosts = filepath.Join(token.Dir(dir), "hosts.yml")
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintln(errOut, "fleet doctor:", err)
 		return 2
 	}
-	checks = append(checks, doctor.Mac(home, s.GitHub.User)...)
+	checks = append(checks, doctor.Mac(home, hosts)...)
 	return report(checks, out)
 }
 
