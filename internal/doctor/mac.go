@@ -104,16 +104,25 @@ func devFolder(home string) Check {
 	return DevFolder(err == nil, names)
 }
 
+func gitOut(args ...string) (string, error) {
+	out, err := rules.Git(args...).Output()
+	return strings.TrimSpace(string(out)), err
+}
+
 func sharedRules(home, ciCopy string) Check {
 	rulesFile := filepath.Join(ciCopy, "agents", "rules.md")
-	behind := -1
+	var c RulesCopy
 	if ciCopy != "" && exists(rulesFile) {
-		behind = 1
-		exec.Command("git", "-C", ciCopy, "fetch", "-q", "origin").Run()
-		if n, err := strconv.Atoi(strings.TrimSpace(output("git", "-C", ciCopy, "rev-list", "--count", "HEAD..@{upstream}"))); err == nil {
-			behind = n
+		c.Found = true
+		status, err := gitOut("-C", ciCopy, "status", "--porcelain")
+		branch, _ := gitOut("-C", ciCopy, "rev-parse", "--abbrev-ref", "HEAD")
+		c.Changed = err != nil || status != "" || branch != rules.Branch
+		c.Fetched = rules.Git("-C", ciCopy, "fetch", "-q", "origin").Run() == nil
+		n, err := gitOut("-C", ciCopy, "rev-list", "--count", "HEAD..@{upstream}")
+		if c.Behind, err = strconv.Atoi(n); err != nil {
+			c.Fetched = false
 		}
 	}
 	target, _ := os.Readlink(filepath.Join(home, ".codex", "AGENTS.md"))
-	return SharedRules(read(filepath.Join(home, ".claude", "CLAUDE.md")), rules.Import(home, rulesFile), target, rulesFile, behind)
+	return SharedRules(read(filepath.Join(home, ".claude", "CLAUDE.md")), rules.Import(home, rulesFile), target, rulesFile, c)
 }

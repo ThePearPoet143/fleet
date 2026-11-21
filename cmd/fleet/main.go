@@ -125,11 +125,17 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		fmt.Fprintln(errOut, "fleet setup:", checkErr)
 		return 1
 	}
+	code := botSteps(configDir, answers.App, gh, out, errOut)
 	if err := agentRules(configDir, out); err != nil {
 		fmt.Fprintln(errOut, "fleet setup: ci's rules:", err)
-		return 1
+		code = 1
 	}
-	if gh.Token == nil || answers.App.Installation <= 0 {
+	return code
+}
+
+// botSteps refresh the token, install its job and make T3 start agents as the bot, once the app is installed.
+func botSteps(configDir string, app settings.App, gh setup.GitHub, out, errOut io.Writer) int {
+	if gh.Token == nil || app.Installation <= 0 {
 		return 0
 	}
 	if code := tokenCmd(configDir, gh.Token, out, errOut); code != 0 {
@@ -144,7 +150,7 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 	if gh.Bot == nil {
 		return 0
 	}
-	if err := serviceEnv(configDir, answers.App.Slug, gh.Bot, out); err != nil {
+	if err := serviceEnv(configDir, app.Slug, gh.Bot, out); err != nil {
 		fmt.Fprintln(errOut, "fleet setup: T3's service.env:", err)
 		return 1
 	}
@@ -158,7 +164,7 @@ func installRules(configDir string, out io.Writer) error {
 		return err
 	}
 	run := func(name string, args ...string) (string, error) {
-		out, err := exec.Command(name, args...).CombinedOutput()
+		out, err := rules.Git(args...).CombinedOutput()
 		return string(out), err
 	}
 	return rules.Install(home, configDir, run, out)

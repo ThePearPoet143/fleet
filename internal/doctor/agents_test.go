@@ -58,21 +58,24 @@ func TestDevFolderPassesOnlyADevFolderHoldingFleet(t *testing.T) {
 func TestSharedRulesPassesWhenClaudeImportsCodexLinksAndTheCopyIsCurrent(t *testing.T) {
 	rules := "/Users/me/Library/Application Support/fleet/ci/agents/rules.md"
 	imp := `@~/Library/Application\ Support/fleet/ci/agents/rules.md`
-	if c := SharedRules("# mine\n"+imp+"\n", imp, rules, rules, 0); !c.Pass {
+	if c := SharedRules("# mine\n"+imp+"  \n", imp, rules, rules, RulesCopy{Found: true, Fetched: true}); !c.Pass {
 		t.Errorf("good = %+v", c)
 	}
 }
 
 func TestSharedRulesNamesEachGap(t *testing.T) {
 	imp := "@~/x/agents/rules.md"
-	c := SharedRules("# mine\n@~/dev/ci/agents/rules.md\n", imp, "/Users/me/dev/ci/agents/rules.md", "/Users/me/x/agents/rules.md", 2)
-	for _, gap := range []string{"Claude", "Codex", "2 behind", "the work clone"} {
+	c := SharedRules("# mine\n@~/dev/ci/agents/rules.md\n", imp, "/Users/me/dev/ci/agents/rules.md", "/Users/me/x/agents/rules.md", RulesCopy{Found: true, Fetched: true, Behind: 2, Changed: true})
+	for _, gap := range []string{"Claude", "Codex", "2 behind", "the work clone", "changed"} {
 		if c.Pass || !strings.Contains(c.Name, gap) || c.Fix != "fleet setup" {
 			t.Errorf("SharedRules = %+v; want it to name %q", c, gap)
 		}
 	}
-	if c := SharedRules(imp+"\n", imp, "/r", "/r", -1); c.Pass || !strings.Contains(c.Name, "no rules copy") {
+	if c := SharedRules(imp+"\n", imp, "/r", "/r", RulesCopy{}); c.Pass || !strings.Contains(c.Name, "no rules copy") {
 		t.Errorf("missing copy = %+v", c)
+	}
+	if c := SharedRules(imp+"\n", imp, "/r", "/r", RulesCopy{Found: true}); c.Pass || !strings.Contains(c.Name, "couldn't fetch") {
+		t.Errorf("offline = %+v", c)
 	}
 }
 

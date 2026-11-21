@@ -454,3 +454,18 @@ func TestSetupSetsUpTheRulesAndReportsAFailure(t *testing.T) {
 		t.Fatalf("setup = %d, %q, %d calls", code, errOut.String(), calls)
 	}
 }
+
+func TestARulesFailureStillLeavesTheTokenJob(t *testing.T) {
+	old := agentRules
+	t.Cleanup(func() { agentRules = old })
+	agentRules = func(string, io.Writer) error { return errors.New("no network") }
+	key, _ := keyed(t)
+	gh, _ := installed(0)
+	gh.Token = func(string, int64, int64) (string, error) { return "ghs_secret", nil }
+	jobs := useJob(t, nil)
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, t.TempDir(), strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	if code != 1 || *jobs != 1 || !strings.Contains(errOut.String(), "ci's rules: no network") {
+		t.Fatalf("setup = %d, %q, %d jobs", code, errOut.String(), *jobs)
+	}
+}

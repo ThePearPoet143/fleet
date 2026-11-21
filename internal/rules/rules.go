@@ -1,6 +1,7 @@
 // https://code.claude.com/docs/en/memory#import-additional-files
 // https://developers.openai.com/codex/guides/agents-md
 // https://git-scm.com/docs/git-pull#Documentation/git-pull.txt---ff-only
+// https://git-scm.com/docs/git#Documentation/git.txt-GITTERMINALPROMPT
 package rules
 
 import (
@@ -9,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -23,6 +25,16 @@ const (
 )
 
 type Runner func(name string, args ...string) (string, error)
+
+// Git runs git without ever asking for a password or passphrase, so setup and the doctor can't hang.
+func Git(args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if os.Getenv("GIT_SSH_COMMAND") == "" {
+		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	}
+	return cmd
+}
 
 // Dir is fleet's own copy of ci, which only fleet updates.
 func Dir(configDir string) string  { return filepath.Join(configDir, "fleet", "ci") }
@@ -77,6 +89,13 @@ func update(dir string, run Runner) error {
 		_, err := git(run, "clone", "--quiet", "--branch", Branch, "--single-branch", Repo, dir)
 		return err
 	}
+	top, err := git(run, "-C", dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return err
+	}
+	if !same(strings.TrimSpace(top), dir) {
+		return fmt.Errorf("%s isn't a copy of ci (its repo is %s): remove it and rerun setup", dir, strings.TrimSpace(top))
+	}
 	branch, err := git(run, "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return err
@@ -90,6 +109,12 @@ func update(dir string, run Runner) error {
 	}
 	_, err = git(run, "-C", dir, "pull", "--quiet", "--ff-only")
 	return err
+}
+
+func same(a, b string) bool {
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }
 
 // readOnly takes write access off every file outside .git, so an edit fails instead of changing agents' rules.
@@ -142,19 +167,24 @@ func Install(home, configDir string, run Runner, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "Claude Code: %s imports fleet's copy of ci's rules\n", claudeMd)
 	}
-	return linkCodex(filepath.Join(home, ".codex", "AGENTS.md"), file, out)
+	return linkCodex(filepath.Join(home, ".codex", "AGENTS.md"), file, filepath.Join(home, "dev", "ci", "agents", "rules.md"), out)
 }
 
-func linkCodex(path, file string, out io.Writer) error {
+// linkCodex links path to file, replacing a link to the work clone's rules and keeping anything else as .before-fleet.
+func readlink(path string) string {
+	target, _ := os.Readlink(path)
+	return target
+}
+
+func linkCodex(path, file, old string, out io.Writer) error {
 	info, err := os.Lstat(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
 		return err
-	case info.Mode()&fs.ModeSymlink != 0:
-		if target, _ := os.Readlink(path); target == file {
-			return nil
-		}
+	case info.Mode()&fs.ModeSymlink != 0 && readlink(path) == file:
+		return nil
+	case info.Mode()&fs.ModeSymlink != 0 && readlink(path) == old:
 		if err := os.Remove(path); err != nil {
 			return err
 		}

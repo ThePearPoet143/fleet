@@ -80,10 +80,18 @@ func DevFolder(exists bool, entries []string) Check {
 	return Check{"repos in ~/dev", exists && slices.Contains(entries, "fleet"), "mkdir -p ~/dev && cd ~/dev && gh repo clone ThePearPoet143/fleet"}
 }
 
-// SharedRules: behind is how far fleet's copy of ci is behind, or -1 when there's no copy.
-func SharedRules(claudeMd, imp, codexTarget, rulesFile string, behind int) Check {
+// RulesCopy is what git says of fleet's copy of ci.
+type RulesCopy struct {
+	Found, Fetched, Changed bool
+	Behind                  int
+}
+
+func SharedRules(claudeMd, imp, codexTarget, rulesFile string, copy RulesCopy) Check {
 	var gaps []string
-	claude := strings.Split(strings.ReplaceAll(claudeMd, "\r\n", "\n"), "\n")
+	var claude []string
+	for _, l := range strings.Split(claudeMd, "\n") {
+		claude = append(claude, strings.TrimSpace(l))
+	}
 	if !slices.Contains(claude, imp) {
 		gaps = append(gaps, "Claude doesn't import them")
 	}
@@ -94,10 +102,17 @@ func SharedRules(claudeMd, imp, codexTarget, rulesFile string, behind int) Check
 		gaps = append(gaps, "Codex doesn't link them")
 	}
 	switch {
-	case behind < 0:
+	case !copy.Found:
 		gaps = append(gaps, "no rules copy")
-	case behind > 0:
-		gaps = append(gaps, fmt.Sprintf("the copy is %d behind", behind))
+	case copy.Changed:
+		gaps = append(gaps, "the copy was changed")
+	}
+	switch {
+	case !copy.Found:
+	case !copy.Fetched:
+		gaps = append(gaps, "couldn't fetch ci to compare")
+	case copy.Behind > 0:
+		gaps = append(gaps, fmt.Sprintf("the copy is %d behind", copy.Behind))
 	}
 	name := "agents have ci's rules"
 	if gaps != nil {

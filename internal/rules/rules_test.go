@@ -37,6 +37,7 @@ type fakeGit struct {
 	ran    []string
 	status string
 	branch string
+	top    string
 	fail   error
 }
 
@@ -57,6 +58,11 @@ func (g *fakeGit) run(name string, args ...string) (string, error) {
 		return g.status, nil
 	case "rev-parse --abbrev-ref HEAD":
 		return g.branch + "\n", nil
+	case "rev-parse --show-toplevel":
+		if g.top != "" {
+			return g.top + "\n", nil
+		}
+		return args[1] + "\n", nil
 	}
 	return "", nil
 }
@@ -119,7 +125,7 @@ func TestInstallRefusesACopySomeoneChanged(t *testing.T) {
 	home, cfg := t.TempDir(), t.TempDir()
 	g := &fakeGit{branch: "dev"}
 	Install(home, cfg, g.run, &bytes.Buffer{})
-	for _, bad := range []fakeGit{{branch: "dev", status: " M agents/rules.md\n"}, {branch: "someone/hq-1"}} {
+	for _, bad := range []fakeGit{{branch: "dev", status: " M agents/rules.md\n"}, {branch: "someone/hq-1"}, {branch: "dev", top: home}} {
 		g := bad
 		if err := Install(home, cfg, g.run, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), Dir(cfg)) || strings.Contains(strings.Join(g.ran, " "), "pull") {
 			t.Errorf("%+v: %v, ran %q", bad, err, g.ran)
@@ -128,5 +134,19 @@ func TestInstallRefusesACopySomeoneChanged(t *testing.T) {
 	g = &fakeGit{fail: errors.New("exit status 128")}
 	if err := Install(t.TempDir(), t.TempDir(), g.run, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "no network") {
 		t.Fatalf("clone failure: %v", err)
+	}
+}
+
+func TestInstallKeepsALinkToTheUsersOwnFile(t *testing.T) {
+	home, cfg := t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	mine := filepath.Join(home, "dotfiles", "AGENTS.md")
+	os.Symlink(mine, filepath.Join(home, ".codex", "AGENTS.md"))
+	g := &fakeGit{branch: "dev"}
+	if err := Install(home, cfg, g.run, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if target, _ := os.Readlink(filepath.Join(home, ".codex", "AGENTS.md.before-fleet")); target != mine {
+		t.Fatalf("backup links %q", target)
 	}
 }
