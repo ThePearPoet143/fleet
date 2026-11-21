@@ -87,8 +87,13 @@ var Steps = []Step{
 		Name: "App ID", Flag: "app-id", Usage: "your agents' App ID, shown on the app's settings page",
 		Title: "Your app's App ID", Kind: Text,
 		Value: func(s *settings.Settings) any { return &s.App.ID },
-		Page:  func(s settings.Settings) string { return SettingsPage(s.App.Slug) },
-		Need:  func(s settings.Settings) bool { return s.App.Slug != "" },
+		Page: func(s settings.Settings) string {
+			if s.App.Slug == "" {
+				return ""
+			}
+			return SettingsPage(s.App.Slug)
+		},
+		Need: func(s settings.Settings) bool { return s.App.Slug != "" },
 		Check: func(text string, _ Lookup) (string, error) {
 			id, err := AppID(text)
 			return strconv.FormatInt(id, 10), err
@@ -113,6 +118,15 @@ var Steps = []Step{
 			return path, nil
 		},
 	},
+}
+
+func stepFor(flag string) Step {
+	for _, st := range Steps {
+		if st.Flag == flag {
+			return st
+		}
+	}
+	panic("no step " + flag)
 }
 
 // Get is the answer as typed: a list comma-separated, no ID as "".

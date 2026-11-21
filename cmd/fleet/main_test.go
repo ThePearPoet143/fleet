@@ -469,3 +469,36 @@ func TestARulesFailureStillLeavesTheTokenJob(t *testing.T) {
 		t.Fatalf("setup = %d, %q, %d jobs", code, errOut.String(), *jobs)
 	}
 }
+
+func withForm(t *testing.T, ask func(a *settings.Settings, user setup.Lookup, open func(string), in io.Reader, out io.Writer) error) {
+	t.Helper()
+	oldForm, oldAsk := form, askForm
+	form, askForm = true, ask
+	t.Cleanup(func() { form, askForm = oldForm, oldAsk })
+}
+
+func TestSetupInATerminalAsksInTheFormAndSaves(t *testing.T) {
+	withForm(t, func(a *settings.Settings, _ setup.Lookup, _ func(string), _ io.Reader, _ io.Writer) error {
+		a.Purpose, a.GitHub.User, a.App.Slug, a.App.ID = "laptop", "someone", "someone-agents", 42
+		return nil
+	})
+	dir := t.TempDir()
+	var out, errOut bytes.Buffer
+	code := setupCmd(nil, dir, strings.NewReader("2\n"), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut)
+	if s, _, _ := settings.Load(settings.Path(dir)); s.Purpose != "laptop" || s.App.ID != 42 || strings.Contains(out.String(), "Enter a number") {
+		t.Fatalf("setup = %d, %q; saved %+v\n%s", code, errOut.String(), s, out.String())
+	}
+}
+
+func TestStoppingTheFormSavesNothing(t *testing.T) {
+	withForm(t, func(a *settings.Settings, _ setup.Lookup, _ func(string), _ io.Reader, _ io.Writer) error {
+		a.Purpose = "laptop"
+		return setup.ErrStopped
+	})
+	dir := t.TempDir()
+	var out, errOut bytes.Buffer
+	code := setupCmd(nil, dir, strings.NewReader(""), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut)
+	if _, err := os.Stat(settings.Path(dir)); code != 130 || !errors.Is(err, os.ErrNotExist) || !strings.Contains(errOut.String(), "nothing saved") {
+		t.Fatalf("setup = %d, %q, settings %v", code, errOut.String(), err)
+	}
+}

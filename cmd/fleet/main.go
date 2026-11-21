@@ -1,6 +1,7 @@
 // https://pkg.go.dev/os#UserConfigDir
 // https://pkg.go.dev/os#FileMode
 // https://ss64.com/mac/open.html
+// https://github.com/charmbracelet/huh/blob/v2.0.3/README.md#accessibility
 package main
 
 import (
@@ -30,6 +31,8 @@ const usage = "usage: fleet doctor | fleet token | fleet setup [--purpose host|l
 var (
 	open         = func(url string) {}
 	piped        = true
+	form         = false
+	askForm      = setup.Form
 	keyWait      = 5 * time.Minute
 	installWait  = 5 * time.Minute
 	installEvery = 3 * time.Second
@@ -75,6 +78,7 @@ func run(args []string, out, errOut io.Writer) int {
 		if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
 			open = func(url string) { _ = exec.Command("open", url).Start() }
 			piped = false
+			form = os.Getenv("ACCESSIBLE") == ""
 		}
 		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), setup.GitHub{User: github.New().User, App: signIn(github.New()), Installation: installation(github.New()), Token: issue(github.New()), Bot: github.New().Bot}, out, errOut); code != 0 {
 			return code
@@ -99,7 +103,15 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 	var askErr error
 	had := answers.App.Key
 	if !f.Yes {
-		askErr = setup.Ask(&answers, gh.User, open, in, out, piped)
+		if form {
+			askErr = askForm(&answers, gh.User, open, in, out)
+		} else {
+			askErr = setup.Ask(&answers, gh.User, open, in, out, piped)
+		}
+		if errors.Is(askErr, setup.ErrStopped) {
+			fmt.Fprintln(errOut, "fleet setup:", askErr)
+			return 130 // as a shell reports an interrupt
+		}
 		if askErr == nil {
 			askErr = takeKey(&answers, filepath.Dir(path), out)
 		}
