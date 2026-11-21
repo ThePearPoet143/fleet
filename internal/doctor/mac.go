@@ -18,11 +18,6 @@ import (
 	"github.com/ThePearPoet143/fleet/internal/rules"
 )
 
-func find(name string) string {
-	path, _ := exec.LookPath(name)
-	return path
-}
-
 func output(name string, args ...string) string {
 	out, _ := exec.Command(name, args...).Output()
 	return string(out)
@@ -52,36 +47,29 @@ func statusCode(url string) int {
 	return resp.StatusCode
 }
 
-func Mac(home, hosts, jobBin, ghDir, slug, ciCopy string) []Check {
-	checks := []Check{
-		Tool("Homebrew", find("brew"), "see https://brew.sh"),
-		Tool("git", find("git"), "xcode-select --install"),
-		Tool("gh", find("gh"), "brew install gh"),
-		Tool("Go", find("go"), "brew install go"),
-		Tool("Claude Code", find("claude"), "see https://claude.com/product/claude-code"),
-		Tool("T3 Code", find("t3"), "curl -fsSL https://t3.codes/install.sh | sh"),
-	}
-	if ts := FindTailscale(find("tailscale"), exists(TailscaleApp)); ts != "" {
-		checks = append(checks, Tailscale(output(ts, "status", "--json")))
-	} else {
-		checks = append(checks, Check{"Tailscale up", false, "install Tailscale: https://tailscale.com/download/mac"})
-	}
-	if find("t3") != "" {
-		env := read(filepath.Join(home, ".t3", "service.env"))
-		port := T3Port(env)
-		checks = append(checks,
-			T3Service(combined("t3", "service", "status")),
-			T3Network(combined("t3", "status")),
-			T3Answers(statusCode(fmt.Sprintf("http://127.0.0.1:%d/", port)), port),
-			AgentEnv(env, ghDir, slug))
-	}
-	checks = append(checks, token(hosts),
-		TokenJob(output("launchctl", "print", fmt.Sprintf("gui/%d/dev.fleet.agent-token", os.Getuid())), jobBin),
-		NoSleep(output("pmset", "-g")))
-	return append(checks, devFolder(home), sharedRules(home, ciCopy))
+// Find is where a program is on PATH, or "".
+func Find(name string) string {
+	path, _ := exec.LookPath(name)
+	return path
 }
 
-func token(hosts string) Check {
+// TailscaleNow asks Tailscale, from its command or the Mac app, whether it's up.
+func TailscaleNow() Check {
+	if ts := FindTailscale(Find("tailscale"), exists(TailscaleApp)); ts != "" {
+		return Tailscale(output(ts, "status", "--json"))
+	}
+	return Check{"Tailscale up", false, "install Tailscale: https://tailscale.com/download/mac"}
+}
+
+// TokenJobNow reads the token job launchd has loaded.
+func TokenJobNow(jobBin string) Check {
+	return TokenJob(output("launchctl", "print", fmt.Sprintf("gui/%d/dev.fleet.agent-token", os.Getuid())), jobBin)
+}
+
+func NoSleepNow() Check { return NoSleep(output("pmset", "-g")) }
+
+// TokenNow reads when the agents' login at hosts was written; "" when there is no installation yet.
+func TokenNow(hosts string) Check {
 	if hosts == "" {
 		return Check{"agents' GitHub token fresh (no app installation in settings)", false, "fleet setup"}
 	}
@@ -92,7 +80,7 @@ func token(hosts string) Check {
 	return AgentToken(true, info.ModTime(), time.Now())
 }
 
-func devFolder(home string) Check {
+func DevFolderNow(home string) Check {
 	dev := filepath.Join(home, "dev")
 	entries, err := os.ReadDir(dev)
 	var names []string
@@ -109,7 +97,8 @@ func gitOut(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-func sharedRules(home, ciCopy string) Check {
+// SharedRulesNow reads fleet's copy of ci and the tools' rules files.
+func SharedRulesNow(home, ciCopy string) Check {
 	rulesFile := filepath.Join(ciCopy, "agents", "rules.md")
 	var c RulesCopy
 	if ciCopy != "" && exists(rulesFile) {

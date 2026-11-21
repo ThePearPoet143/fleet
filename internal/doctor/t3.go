@@ -3,6 +3,7 @@ package doctor
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -52,4 +53,17 @@ func T3Port(serviceEnv string) int {
 
 func T3Answers(statusCode, port int) Check {
 	return Check{fmt.Sprintf("T3 Code answers on port %d", port), statusCode >= 200 && statusCode < 400, "t3 service restart" + atTheMac}
+}
+
+// T3Env is T3's service.env, or "".
+func T3Env(home string) string { return read(filepath.Join(home, ".t3", "service.env")) }
+
+func T3ServiceNow() Check { return T3Service(combined("t3", "service", "status")) }
+
+func T3NetworkNow() Check { return T3Network(combined("t3", "status")) }
+
+// T3AnswersNow asks T3 on the port its service.env names.
+func T3AnswersNow(home string) Check {
+	port := T3Port(T3Env(home))
+	return T3Answers(statusCode(fmt.Sprintf("http://127.0.0.1:%d/", port)), port)
 }
