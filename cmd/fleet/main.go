@@ -15,6 +15,7 @@ import (
 
 	"github.com/ThePearPoet143/fleet/internal/doctor"
 	"github.com/ThePearPoet143/fleet/internal/github"
+	"github.com/ThePearPoet143/fleet/internal/job"
 	"github.com/ThePearPoet143/fleet/internal/settings"
 	"github.com/ThePearPoet143/fleet/internal/setup"
 	"github.com/ThePearPoet143/fleet/internal/system"
@@ -30,6 +31,7 @@ var (
 	keyWait      = 5 * time.Minute
 	installWait  = 5 * time.Minute
 	installEvery = 3 * time.Second
+	agentJob     = installJob
 	downloads    = func() string {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, "Downloads")
@@ -67,7 +69,7 @@ func run(args []string, out, errOut io.Writer) int {
 			open = func(url string) { _ = exec.Command("open", url).Start() }
 			piped = false
 		}
-		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), setup.GitHub{User: github.New().User, App: signIn(github.New()), Installation: installation(github.New())}, out, errOut); code != 0 {
+		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), setup.GitHub{User: github.New().User, App: signIn(github.New()), Installation: installation(github.New()), Token: issue(github.New())}, out, errOut); code != 0 {
 			return code
 		}
 	}
@@ -116,7 +118,44 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		fmt.Fprintln(errOut, "fleet setup:", checkErr)
 		return 1
 	}
+	if gh.Token == nil || answers.App.Installation <= 0 {
+		return 0
+	}
+	if code := tokenCmd(configDir, gh.Token, out, errOut); code != 0 {
+		return code
+	}
+	plist, err := agentJob(configDir)
+	if err != nil {
+		fmt.Fprintln(errOut, "fleet setup: the token job:", err)
+		return 1
+	}
+	fmt.Fprintf(out, "the token job (%s) runs fleet token every %d minutes and at login\n", plist, job.Every/60)
 	return 0
+}
+
+// installJob copies this program next to settings and loads the login job that runs it.
+func installJob(configDir string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if self, err = filepath.EvalSymlinks(self); err != nil {
+		return "", err
+	}
+	bin := job.Bin(configDir)
+	if err := job.Copy(self, bin); err != nil {
+		return "", err
+	}
+	plist := filepath.Join(home, "Library", "LaunchAgents", job.Label+".plist")
+	run := func(name string, args ...string) (string, error) {
+		out, err := exec.Command(name, args...).CombinedOutput()
+		return string(out), err
+	}
+	return plist, job.Install(plist, job.Job{Bin: bin, Home: home, Log: job.Log(configDir)}, os.Getuid(), run)
 }
 
 func takeKey(a *settings.Settings, dir string, out io.Writer) error {
@@ -242,7 +281,7 @@ func install(a *settings.Settings, gh setup.GitHub, wait bool, out io.Writer) er
 
 func doctorCmd(out, errOut io.Writer) int {
 	var s settings.Settings
-	hosts := ""
+	hosts, jobBin := "", ""
 	checks := []doctor.Check{}
 	if dir, err := os.UserConfigDir(); err != nil {
 		checks = append(checks, doctor.Settings("", false, err))
@@ -254,13 +293,14 @@ func doctorCmd(out, errOut io.Writer) int {
 		if s.App.Installation > 0 {
 			hosts = filepath.Join(token.Dir(dir), "hosts.yml")
 		}
+		jobBin = job.Bin(dir)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintln(errOut, "fleet doctor:", err)
 		return 2
 	}
-	checks = append(checks, doctor.Mac(home, hosts)...)
+	checks = append(checks, doctor.Mac(home, hosts, jobBin)...)
 	return report(checks, out)
 }
 

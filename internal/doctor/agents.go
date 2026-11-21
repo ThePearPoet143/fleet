@@ -39,6 +39,23 @@ func AgentToken(exists bool, written, now time.Time) Check {
 	return Check{"agents' GitHub token fresh", exists && now.Sub(written) < time.Hour, "fleet token"}
 }
 
+var (
+	jobProgram = regexp.MustCompile(`(?m)^\s*program = (.+)$`)
+	jobArgs    = regexp.MustCompile(`(?s)arguments = \{\n(.*?)\n\s*\}`)
+)
+
+// TokenJob reads launchctl print gui/<uid>/dev.fleet.agent-token.
+func TokenJob(print, bin string) Check {
+	ok := false
+	if m := jobProgram.FindStringSubmatch(print); m != nil && strings.TrimSpace(m[1]) == bin {
+		if a := jobArgs.FindStringSubmatch(print); a != nil {
+			args := strings.Fields(strings.ReplaceAll(a[1], bin, ""))
+			ok = len(args) == 1 && args[0] == "token"
+		}
+	}
+	return Check{"the token job runs fleet token", ok, "fleet setup" + atTheMac}
+}
+
 func DevFolder(exists bool, entries []string) Check {
 	return Check{"repos in ~/dev", exists && slices.Contains(entries, "fleet"), "mkdir -p ~/dev && cd ~/dev && gh repo clone ThePearPoet143/fleet"}
 }
