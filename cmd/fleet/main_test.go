@@ -412,3 +412,31 @@ func TestSetupWritesTheBotsLinesIntoT3sServiceEnv(t *testing.T) {
 		t.Fatalf("rerun = %d, %q\n%s", code, errOut.String(), out.String())
 	}
 }
+
+func TestServiceEnvKeepsALinkAndSkipsAMachineWithoutT3(t *testing.T) {
+	t3, dots := t.TempDir(), t.TempDir()
+	old := t3Home
+	t.Cleanup(func() { t3Home = old })
+	bot := func(string) (int64, error) { return 7, nil }
+	t3Home = func() string { return filepath.Join(t3, "none") }
+	var out bytes.Buffer
+	if err := serviceEnv("/cfg", "someone-agents", bot, &out); err != nil || !strings.Contains(out.String(), "skipped") {
+		t.Fatalf("no T3: %v, %q", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(t3, "none")); err == nil {
+		t.Fatal("made a T3 folder")
+	}
+	t3Home = func() string { return t3 }
+	real := filepath.Join(dots, "service.env")
+	os.WriteFile(real, []byte("T3CODE_LAN=true\n"), 0o600)
+	os.Symlink(real, filepath.Join(t3, "service.env"))
+	if err := serviceEnv("/cfg", "someone-agents", bot, &out); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(t3, "service.env")); err != nil || target != real {
+		t.Fatalf("link replaced: %q, %v", target, err)
+	}
+	if text, _ := os.ReadFile(real); !strings.Contains(string(text), "GIT_AUTHOR_NAME=someone-agents[bot]") {
+		t.Fatalf("target = %q", text)
+	}
+}

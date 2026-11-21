@@ -12,21 +12,27 @@ import (
 
 const RulesImport = "@~/dev/ci/agents/rules.md"
 
-var envLine = regexp.MustCompile(`(?m)^[ \t]*([A-Z_]+)[ \t]*=[ \t]*(.*)$`)
+var envLine = regexp.MustCompile(`(?m)^[ \t]*(?:export[ \t]+)?([A-Z_]+)[ \t]*=[ \t]*(.*)$`)
 
-func unquote(v string) string {
-	v = strings.TrimSpace(v)
-	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
-		return v[1 : len(v)-1]
+// envValue reads a value as Node's util.parseEnv does: a quoted value up to its closing quote, else up to a #.
+func envValue(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v != "" && strings.ContainsRune("\"'`", rune(v[0])) {
+		if end := strings.IndexByte(v[1:], v[0]); end >= 0 {
+			return v[1 : 1+end]
+		}
 	}
-	return v
+	if i := strings.IndexByte(v, '#'); i >= 0 {
+		v = v[:i]
+	}
+	return strings.TrimSpace(v)
 }
 
 // AgentEnv reads T3's service.env; with fleet's gh folder and app it also checks they're the ones named.
 func AgentEnv(serviceEnv, ghDir, slug string) Check {
 	values := map[string]string{}
 	for _, m := range envLine.FindAllStringSubmatch(serviceEnv, -1) {
-		values[m[1]] = unquote(m[2])
+		values[m[1]] = envValue(m[2])
 	}
 	var missing []string
 	for _, key := range []string{"GH_CONFIG_DIR", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {

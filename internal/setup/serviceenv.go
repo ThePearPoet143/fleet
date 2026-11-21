@@ -10,7 +10,7 @@ import (
 
 type EnvLine struct{ Key, Value string }
 
-var envKey = regexp.MustCompile(`^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=`)
+var envKey = regexp.MustCompile(`^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=`)
 
 // BotLines start every agent T3 runs as the app's bot: gh's login and git's name and email.
 func BotLines(ghDir, slug string, botID int64) []EnvLine {

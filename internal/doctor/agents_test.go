@@ -107,3 +107,14 @@ func TestAgentEnvReadsAQuotedPathAndWantsFleetsLoginAndApp(t *testing.T) {
 		t.Fatalf("another app = %+v", c)
 	}
 }
+
+func TestAgentEnvReadsExportLinesAndCommentsAsNodeDoes(t *testing.T) {
+	env := goodEnv + "export GH_CONFIG_DIR=/elsewhere\n"
+	if c := AgentEnv(env, "/Users/me/.people/owner/agents/gh", ""); c.Pass {
+		t.Fatalf("a later export line is the value T3 uses: %+v", c)
+	}
+	commented := strings.Replace(goodEnv, "GIT_AUTHOR_NAME=someone-agents[bot]", "GIT_AUTHOR_NAME=someone-agents[bot]  # the bot", 1)
+	if c := AgentEnv(commented, "", "someone-agents"); !c.Pass {
+		t.Fatalf("comment = %+v", c)
+	}
+}

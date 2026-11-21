@@ -147,11 +147,18 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 
 // serviceEnv makes every agent T3 starts act as the bot; T3 applies it on its next start.
 func serviceEnv(configDir, slug string, bot func(string) (int64, error), out io.Writer) error {
+	if _, err := os.Stat(t3Home()); err != nil {
+		fmt.Fprintf(out, "T3 Code isn't set up here (no %s); skipped its service.env\n", t3Home())
+		return nil
+	}
 	id, err := bot(slug)
 	if err != nil {
 		return err
 	}
 	path := filepath.Join(t3Home(), "service.env")
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
 	old, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

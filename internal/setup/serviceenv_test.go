@@ -32,3 +32,10 @@ func TestMergeEnvKeepsOtherLinesAndReplacesOldValuesInPlace(t *testing.T) {
 		t.Fatalf("second merge changed it:\n%s", again)
 	}
 }
+
+func TestMergeEnvReplacesAnExportLine(t *testing.T) {
+	got, _ := MergeEnv("export GIT_AUTHOR_NAME=old\n", BotLines(ghDir, "someone-agents", 7))
+	if strings.Contains(got, "old") || strings.Count(got, "GIT_AUTHOR_NAME") != 1 {
+		t.Fatalf("merged:\n%s", got)
+	}
+}
