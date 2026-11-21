@@ -66,6 +66,7 @@ func TokenJobNow(jobBin string) Check {
 	return TokenJob(output("launchctl", "print", fmt.Sprintf("gui/%d/dev.fleet.agent-token", os.Getuid())), jobBin)
 }
 
+// NoSleepNow reads pmset's sleep setting.
 func NoSleepNow() Check { return NoSleep(output("pmset", "-g")) }
 
 // TokenNow reads when the agents' login at hosts was written; "" when there is no installation yet.
@@ -80,6 +81,7 @@ func TokenNow(hosts string) Check {
 	return AgentToken(true, info.ModTime(), time.Now())
 }
 
+// DevFolderNow lists the folders in ~/dev.
 func DevFolderNow(home string) Check {
 	dev := filepath.Join(home, "dev")
 	entries, err := os.ReadDir(dev)

@@ -100,7 +100,7 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 	}
 	answers := setup.Answers(current, f, found)
 	w := &work{s: &answers, configDir: configDir, gh: gh, wait: !f.Yes, out: out, errOut: errOut}
-	var askErr error
+	var askErr, checkErr error // w.s points at answers, so answers is only ever assigned to
 	had := answers.App.Key
 	if !f.Yes {
 		if form {
@@ -120,7 +120,7 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 	if had == "" && answers.App.Key != "" {
 		taken = answers.App.Key
 	}
-	answers, checkErr := setup.Check(answers, current, gh)
+	answers, checkErr = setup.Check(answers, current, gh)
 	if taken != "" && answers.App.Key == "" {
 		answers.App.Key = taken
 	}

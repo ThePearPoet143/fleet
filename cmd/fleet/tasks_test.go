@@ -97,3 +97,15 @@ func TestSetupRunsTheSharedTasksBeforeT3s(t *testing.T) {
 		t.Fatalf("setup runs %q; want %q", names, want)
 	}
 }
+
+func TestTheTokenCheckWithoutAnInstallationOrConfigFolderSaysSo(t *testing.T) {
+	var checks []doctor.Check
+	for _, tk := range shared {
+		if tk.name == "the token" {
+			checks = tk.check(place{s: settings.Settings{App: settings.App{Installation: 99}}})
+		}
+	}
+	if len(checks) != 1 || checks[0].Pass || checks[0].Name != "agents' GitHub token fresh (no app installation in settings)" {
+		t.Fatalf("token check = %+v", checks)
+	}
+}

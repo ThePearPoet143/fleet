@@ -58,8 +58,10 @@ func T3Answers(statusCode, port int) Check {
 // T3Env is T3's service.env, or "".
 func T3Env(home string) string { return read(filepath.Join(home, ".t3", "service.env")) }
 
+// T3ServiceNow reads t3 service status.
 func T3ServiceNow() Check { return T3Service(combined("t3", "service", "status")) }
 
+// T3NetworkNow reads t3 status.
 func T3NetworkNow() Check { return T3Network(combined("t3", "status")) }
 
 // T3AnswersNow asks T3 on the port its service.env names.

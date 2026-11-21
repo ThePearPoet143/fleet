@@ -357,11 +357,31 @@ func TestSetupInstallsNoJobWithoutAWorkingToken(t *testing.T) {
 	key, _ := keyed(t)
 	gh, _ := installed(0)
 	gh.Token = func(string, int64, int64) (string, error) { return "", errors.New("GitHub answered 401") }
+	bots := 0
+	gh.Bot = func(string) (int64, error) { bots++; return 7, nil }
 	jobs := useJob(t, nil)
 	var out, errOut bytes.Buffer
 	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
-	if code != 1 || *jobs != 0 || !strings.Contains(errOut.String(), "401") {
-		t.Fatalf("setup = %d, %q, %d jobs", code, errOut.String(), *jobs)
+	if code != 1 || *jobs != 0 || bots != 0 || !strings.Contains(errOut.String(), "401") {
+		t.Fatalf("setup = %d, %q, %d jobs, %d service.env lookups", code, errOut.String(), *jobs, bots)
+	}
+}
+
+func TestAJobFailureStillWritesT3sServiceEnv(t *testing.T) {
+	dir, t3 := t.TempDir(), t.TempDir()
+	old := t3Home
+	t3Home = func() string { return t3 }
+	t.Cleanup(func() { t3Home = old })
+	key, _ := keyed(t)
+	gh, _ := installed(0)
+	gh.Token = func(string, int64, int64) (string, error) { return "ghs_secret", nil }
+	gh.Bot = func(string) (int64, error) { return 7, nil }
+	useJob(t, errors.New("launchctl bootstrap: 125"))
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	env, _ := os.ReadFile(filepath.Join(t3, "service.env"))
+	if code != 1 || errOut.String() != "fleet setup: the token job: launchctl bootstrap: 125\n" || !strings.Contains(string(env), "GIT_AUTHOR_NAME=someone-agents[bot]") {
+		t.Fatalf("setup = %d, %q; service.env %q", code, errOut.String(), env)
 	}
 }
 
