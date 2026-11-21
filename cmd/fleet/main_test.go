@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	t3Home = func() string { return t3 }
+	agentRules = func(string, io.Writer) error { return nil }
 	code := m.Run()
 	os.RemoveAll(dl)
 	os.RemoveAll(t3)
@@ -438,5 +440,32 @@ func TestServiceEnvKeepsALinkAndSkipsAMachineWithoutT3(t *testing.T) {
 	}
 	if text, _ := os.ReadFile(real); !strings.Contains(string(text), "GIT_AUTHOR_NAME=someone-agents[bot]") {
 		t.Fatalf("target = %q", text)
+	}
+}
+
+func TestSetupSetsUpTheRulesAndReportsAFailure(t *testing.T) {
+	old := agentRules
+	t.Cleanup(func() { agentRules = old })
+	calls := 0
+	agentRules = func(string, io.Writer) error { calls++; return errors.New("git clone: fatal: no network") }
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--yes"}, t.TempDir(), strings.NewReader(""), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut)
+	if code != 1 || calls != 1 || !strings.Contains(errOut.String(), "ci's rules: git clone: fatal: no network") {
+		t.Fatalf("setup = %d, %q, %d calls", code, errOut.String(), calls)
+	}
+}
+
+func TestARulesFailureStillLeavesTheTokenJob(t *testing.T) {
+	old := agentRules
+	t.Cleanup(func() { agentRules = old })
+	agentRules = func(string, io.Writer) error { return errors.New("no network") }
+	key, _ := keyed(t)
+	gh, _ := installed(0)
+	gh.Token = func(string, int64, int64) (string, error) { return "ghs_secret", nil }
+	jobs := useJob(t, nil)
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, t.TempDir(), strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	if code != 1 || *jobs != 1 || !strings.Contains(errOut.String(), "ci's rules: no network") {
+		t.Fatalf("setup = %d, %q, %d jobs", code, errOut.String(), *jobs)
 	}
 }

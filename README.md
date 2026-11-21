@@ -75,3 +75,13 @@ GIT_COMMITTER_EMAIL=<bot ID>+<app>[bot]@users.noreply.github.com
 
 T3 reads the file when it starts, and a restart stops running agents, so setup leaves `t3 service restart` to you, at
 the Mac. The doctor checks the lines name fleet's login and your app. What you run in a plain terminal stays you.
+
+## The agents' rules
+
+Every agent follows ci's rules (`agents/rules.md` in [ci](https://github.com/ThePearPoet143/ci)). Setup keeps its own
+copy of ci at `dev`, `fleet/ci` next to settings, apart from any clone you work in, so switching a branch or editing
+there never changes agents' rules. Only setup updates it (`git pull --ff-only`); its files are read-only, and setup
+stops if the copy is on another branch or edited. Claude Code imports the rules from `~/.claude/CLAUDE.md` (each space
+in the path after a backslash, in place of an old `@~/dev/ci/agents/rules.md`), and Codex reads `~/.codex/AGENTS.md`,
+a link to them; your own `AGENTS.md` is kept as `AGENTS.md.before-fleet`. The doctor checks both and that the copy is
+current. Undo: remove the import line, delete `~/.codex/AGENTS.md` (restore any `.before-fleet` copy) and `fleet/ci`.
