@@ -64,6 +64,32 @@ func TestInstallSaysWhereToRunItWhenLaunchdRefuses(t *testing.T) {
 	}
 }
 
+func TestInstallRetriesABootstrapRightAfterBootoutAndBlamesSSHOnlyFor125(t *testing.T) {
+	pause = 0
+	path := filepath.Join(t.TempDir(), "dev.fleet.agent-token.plist")
+	tries := 0
+	busy := func(name string, args ...string) (string, error) {
+		if args[0] == "bootstrap" {
+			if tries++; tries == 1 {
+				return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+			}
+		}
+		return "", nil
+	}
+	if err := Install(path, Job{Bin: "/b/fleet"}, 501, busy); err != nil || tries != 2 {
+		t.Fatalf("retry: %v after %d tries", err, tries)
+	}
+	broken := func(name string, args ...string) (string, error) {
+		if args[0] == "bootstrap" {
+			return "Bootstrap failed: 5: Input/output error", errors.New("exit status 5")
+		}
+		return "", nil
+	}
+	if err := Install(path, Job{Bin: "/b/fleet"}, 501, broken); err == nil || strings.Contains(err.Error(), "not over SSH") || !strings.Contains(err.Error(), "Input/output error") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestCopyLeavesAFixedOwnerOnlyProgram(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "built")

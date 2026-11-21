@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -48,6 +49,9 @@ func Plist(j Job) string {
 `
 }
 
+// pause lets launchd finish a bootout before the bootstrap is tried again.
+var pause = 2 * time.Second
+
 type Runner func(name string, args ...string) (string, error)
 
 // Install writes the plist and loads it in the user's login session, replacing a job of the same label.
@@ -60,10 +64,18 @@ func Install(path string, j Job, uid int, run Runner) error {
 	}
 	domain := "gui/" + strconv.Itoa(uid)
 	run("launchctl", "bootout", domain+"/"+Label)
-	if out, err := run("launchctl", "bootstrap", domain, path); err != nil {
-		return fmt.Errorf("launchctl bootstrap %s: %s (%v): start it at the Mac, not over SSH", path, strings.TrimSpace(out), err)
+	out, err := run("launchctl", "bootstrap", domain, path)
+	if err != nil && !strings.Contains(out, " 125:") {
+		time.Sleep(pause)
+		out, err = run("launchctl", "bootstrap", domain, path)
 	}
-	return nil
+	switch {
+	case err == nil:
+		return nil
+	case strings.Contains(out, " 125:"):
+		return fmt.Errorf("launchctl bootstrap %s: %s: start it at the Mac, not over SSH", path, strings.TrimSpace(out))
+	}
+	return fmt.Errorf("launchctl bootstrap %s: %s (%v)", path, strings.TrimSpace(out), err)
 }
 
 // Copy puts src at dst in one step, runnable only by its owner.
