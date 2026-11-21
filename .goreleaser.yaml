@@ -1,0 +1,30 @@
+# https://goreleaser.com/customization/builds/go/
+# https://goreleaser.com/customization/archive/
+# Built only by CI: on every pull request as a snapshot (tests.yml), and published from a tag (release.yml).
+version: 2
+
+project_name: fleet
+
+builds:
+  - main: ./cmd/fleet
+    binary: fleet
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+# One file per system, no archive, with no version in its name, so the latest one is always at
+# https://github.com/ThePearPoet143/fleet/releases/latest/download/fleet_<os>_<arch>
+archives:
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+# https://goreleaser.com/customization/release/
+# A tag like v0.2.0-rc1 is a prerelease, so releases/latest keeps pointing at the last real one.
+release:
+  prerelease: auto
