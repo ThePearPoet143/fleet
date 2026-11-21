@@ -150,8 +150,14 @@ func TestMain(m *testing.M) {
 	}
 	downloads, keyWait, installWait = func() string { return dl }, 0, 0
 	agentJob = func(string) (string, error) { panic("a test installed the real job") }
+	t3, err := os.MkdirTemp("", "t3")
+	if err != nil {
+		panic(err)
+	}
+	t3Home = func() string { return t3 }
 	code := m.Run()
 	os.RemoveAll(dl)
+	os.RemoveAll(t3)
 	os.Exit(code)
 }
 
@@ -378,4 +384,59 @@ func useJob(t *testing.T, err error) *int {
 	}
 	t.Cleanup(func() { agentJob = old })
 	return &calls
+}
+
+func TestSetupWritesTheBotsLinesIntoT3sServiceEnv(t *testing.T) {
+	dir, t3 := t.TempDir(), t.TempDir()
+	old := t3Home
+	t3Home = func() string { return t3 }
+	t.Cleanup(func() { t3Home = old })
+	os.WriteFile(filepath.Join(t3, "service.env"), []byte("T3CODE_LAN=true\n"), 0o644)
+	key, _ := keyed(t)
+	gh, _ := installed(0)
+	gh.Token = func(string, int64, int64) (string, error) { return "ghs_secret", nil }
+	gh.Bot = func(slug string) (int64, error) { return 7, nil }
+	useJob(t, nil)
+	args := []string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}
+	var out, errOut bytes.Buffer
+	if code := setupCmd(args, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut); code != 0 || !strings.Contains(out.String(), "t3 service restart") {
+		t.Fatalf("setup = %d, %q\n%s", code, errOut.String(), out.String())
+	}
+	env, _ := os.ReadFile(filepath.Join(t3, "service.env"))
+	info, _ := os.Stat(filepath.Join(t3, "service.env"))
+	if !strings.HasPrefix(string(env), "T3CODE_LAN=true\nGH_CONFIG_DIR="+filepath.Join(dir, "fleet", "gh")+"\n") || !strings.Contains(string(env), "GIT_AUTHOR_EMAIL=7+someone-agents[bot]@") || info.Mode().Perm() != 0o600 {
+		t.Fatalf("service.env %v:\n%s", info.Mode(), env)
+	}
+	out.Reset()
+	if code := setupCmd(args, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut); code != 0 || strings.Contains(out.String(), "t3 service restart") {
+		t.Fatalf("rerun = %d, %q\n%s", code, errOut.String(), out.String())
+	}
+}
+
+func TestServiceEnvKeepsALinkAndSkipsAMachineWithoutT3(t *testing.T) {
+	t3, dots := t.TempDir(), t.TempDir()
+	old := t3Home
+	t.Cleanup(func() { t3Home = old })
+	bot := func(string) (int64, error) { return 7, nil }
+	t3Home = func() string { return filepath.Join(t3, "none") }
+	var out bytes.Buffer
+	if err := serviceEnv("/cfg", "someone-agents", bot, &out); err != nil || !strings.Contains(out.String(), "skipped") {
+		t.Fatalf("no T3: %v, %q", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(t3, "none")); err == nil {
+		t.Fatal("made a T3 folder")
+	}
+	t3Home = func() string { return t3 }
+	real := filepath.Join(dots, "service.env")
+	os.WriteFile(real, []byte("T3CODE_LAN=true\n"), 0o600)
+	os.Symlink(real, filepath.Join(t3, "service.env"))
+	if err := serviceEnv("/cfg", "someone-agents", bot, &out); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(t3, "service.env")); err != nil || target != real {
+		t.Fatalf("link replaced: %q, %v", target, err)
+	}
+	if text, _ := os.ReadFile(real); !strings.Contains(string(text), "GIT_AUTHOR_NAME=someone-agents[bot]") {
+		t.Fatalf("target = %q", text)
+	}
 }

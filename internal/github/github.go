@@ -69,3 +69,15 @@ func (c *Client) User(name string) (string, error) {
 	}
 	return user.Login, nil
 }
+
+// Bot returns the user ID of the app's bot account, which its commit email uses.
+func (c *Client) Bot(slug string) (int64, error) {
+	var bot struct{ ID int64 }
+	if err := c.get("users", slug+"[bot]", fmt.Sprintf("no GitHub account %q", slug+"[bot]"), &bot); err != nil {
+		return 0, err
+	}
+	if bot.ID == 0 {
+		return 0, fmt.Errorf("GitHub gave no ID for %q", slug+"[bot]")
+	}
+	return bot.ID, nil
+}

@@ -50,7 +50,7 @@ func statusCode(url string) int {
 	return resp.StatusCode
 }
 
-func Mac(home, hosts, jobBin string) []Check {
+func Mac(home, hosts, jobBin, ghDir, slug string) []Check {
 	checks := []Check{
 		Tool("Homebrew", find("brew"), "see https://brew.sh"),
 		Tool("git", find("git"), "xcode-select --install"),
@@ -71,7 +71,7 @@ func Mac(home, hosts, jobBin string) []Check {
 			T3Service(combined("t3", "service", "status")),
 			T3Network(combined("t3", "status")),
 			T3Answers(statusCode(fmt.Sprintf("http://127.0.0.1:%d/", port)), port),
-			AgentEnv(env))
+			AgentEnv(env, ghDir, slug))
 	}
 	checks = append(checks, token(hosts),
 		TokenJob(output("launchctl", "print", fmt.Sprintf("gui/%d/dev.fleet.agent-token", os.Getuid())), jobBin),

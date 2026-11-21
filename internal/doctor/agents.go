@@ -12,12 +12,27 @@ import (
 
 const RulesImport = "@~/dev/ci/agents/rules.md"
 
-var envLine = regexp.MustCompile(`(?m)^[ \t]*([A-Z_]+)[ \t]*=[ \t]*(.*)$`)
+var envLine = regexp.MustCompile(`(?m)^[ \t]*(?:export[ \t]+)?([A-Z_]+)[ \t]*=[ \t]*(.*)$`)
 
-func AgentEnv(serviceEnv string) Check {
+// envValue reads a value as Node's util.parseEnv does: a quoted value up to its closing quote, else up to a #.
+func envValue(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v != "" && strings.ContainsRune("\"'`", rune(v[0])) {
+		if end := strings.IndexByte(v[1:], v[0]); end >= 0 {
+			return v[1 : 1+end]
+		}
+	}
+	if i := strings.IndexByte(v, '#'); i >= 0 {
+		v = v[:i]
+	}
+	return strings.TrimSpace(v)
+}
+
+// AgentEnv reads T3's service.env; with fleet's gh folder and app it also checks they're the ones named.
+func AgentEnv(serviceEnv, ghDir, slug string) Check {
 	values := map[string]string{}
 	for _, m := range envLine.FindAllStringSubmatch(serviceEnv, -1) {
-		values[m[1]] = strings.TrimSpace(m[2])
+		values[m[1]] = envValue(m[2])
 	}
 	var missing []string
 	for _, key := range []string{"GH_CONFIG_DIR", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
@@ -27,12 +42,17 @@ func AgentEnv(serviceEnv string) Check {
 	}
 	if dir := values["GH_CONFIG_DIR"]; dir != "" && !strings.HasPrefix(dir, "/") {
 		missing = append(missing, "GH_CONFIG_DIR (a full path, not ~)")
+	} else if dir != "" && ghDir != "" && dir != ghDir {
+		missing = append(missing, "GH_CONFIG_DIR isn't fleet's login, "+ghDir)
+	}
+	if name := values["GIT_AUTHOR_NAME"]; slug != "" && name != "" && (name != slug+"[bot]" || values["GIT_COMMITTER_NAME"] != name) {
+		missing = append(missing, "commits as "+name+", not "+slug+"[bot]")
 	}
 	name := "T3 starts agents as the bot"
 	if missing != nil {
 		name += " (missing: " + strings.Join(missing, ", ") + ")"
 	}
-	return Check{name, missing == nil, "add them to ~/.t3/service.env (fleet-ps README, The agents' identity), then t3 service restart at the Mac"}
+	return Check{name, missing == nil, "fleet setup, then t3 service restart" + atTheMac}
 }
 
 func AgentToken(exists bool, written, now time.Time) Check {

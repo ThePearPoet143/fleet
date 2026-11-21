@@ -7,12 +7,13 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ThePearPoet143/fleet/internal/files"
 )
 
 const (
@@ -80,29 +81,9 @@ func Install(path string, j Job, uid int, run Runner) error {
 
 // Copy puts src at dst in one step, runnable only by its owner.
 func Copy(src, dst string) error {
-	in, err := os.Open(src)
+	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(dst), "fleet-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err := io.Copy(f, in); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Chmod(0o700); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), dst)
+	return files.Write(dst, data, 0o700)
 }

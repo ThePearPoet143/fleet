@@ -15,17 +15,17 @@ GIT_COMMITTER_EMAIL=1+someone-agents[bot]@users.noreply.github.com
 `
 
 func TestAgentEnvPassesWhenT3StartsEveryAgentAsTheBot(t *testing.T) {
-	if c := AgentEnv(goodEnv); !c.Pass {
+	if c := AgentEnv(goodEnv, "", ""); !c.Pass {
 		t.Errorf("good = %+v", c)
 	}
 }
 
 func TestAgentEnvNamesWhatIsMissingAndRefusesATildePath(t *testing.T) {
-	if c := AgentEnv("T3CODE_LAN=true\n"); c.Pass || !strings.Contains(c.Name, "GH_CONFIG_DIR") {
+	if c := AgentEnv("T3CODE_LAN=true\n", "", ""); c.Pass || !strings.Contains(c.Name, "GH_CONFIG_DIR") {
 		t.Errorf("missing = %+v", c)
 	}
 	tilde := strings.Replace(goodEnv, "/Users/me", "~", 1)
-	if c := AgentEnv(tilde); c.Pass || !strings.Contains(c.Name, "a full path, not ~") {
+	if c := AgentEnv(tilde, "", ""); c.Pass || !strings.Contains(c.Name, "a full path, not ~") {
 		t.Errorf("tilde = %+v", c)
 	}
 }
@@ -73,7 +73,7 @@ func TestSharedRulesNamesEachGap(t *testing.T) {
 
 func TestAgentEnvTreatsAnEmptyValueAsMissingNotTheNextLine(t *testing.T) {
 	env := strings.Replace(goodEnv, "GIT_AUTHOR_EMAIL=1+someone-agents[bot]@users.noreply.github.com", "GIT_AUTHOR_EMAIL=", 1)
-	if c := AgentEnv(env); c.Pass || !strings.Contains(c.Name, "missing: GIT_AUTHOR_EMAIL)") {
+	if c := AgentEnv(env, "", ""); c.Pass || !strings.Contains(c.Name, "missing: GIT_AUTHOR_EMAIL)") {
 		t.Errorf("empty email = %+v", c)
 	}
 }
@@ -91,5 +91,30 @@ func TestTokenJobPassesOnlyAJobRunningFleetToken(t *testing.T) {
 		if c := TokenJob(out, bin); c.Pass || !strings.Contains(c.Fix, "fleet setup") {
 			t.Errorf("%s = %+v", name, c)
 		}
+	}
+}
+
+func TestAgentEnvReadsAQuotedPathAndWantsFleetsLoginAndApp(t *testing.T) {
+	dir := "/Users/me/Library/Application Support/fleet/gh"
+	env := strings.Replace(goodEnv, "GH_CONFIG_DIR=/Users/me/.people/owner/agents/gh", `GH_CONFIG_DIR="`+dir+`"`, 1)
+	if c := AgentEnv(env, dir, "someone-agents"); !c.Pass {
+		t.Fatalf("quoted = %+v", c)
+	}
+	if c := AgentEnv(goodEnv, dir, "someone-agents"); c.Pass || !strings.Contains(c.Name, "GH_CONFIG_DIR isn't fleet's login") {
+		t.Fatalf("fleet-ps's folder = %+v", c)
+	}
+	if c := AgentEnv(env, dir, "other-agents"); c.Pass || !strings.Contains(c.Name, "not other-agents[bot]") || !strings.HasPrefix(c.Fix, "fleet setup") {
+		t.Fatalf("another app = %+v", c)
+	}
+}
+
+func TestAgentEnvReadsExportLinesAndCommentsAsNodeDoes(t *testing.T) {
+	env := goodEnv + "export GH_CONFIG_DIR=/elsewhere\n"
+	if c := AgentEnv(env, "/Users/me/.people/owner/agents/gh", ""); c.Pass {
+		t.Fatalf("a later export line is the value T3 uses: %+v", c)
+	}
+	commented := strings.Replace(goodEnv, "GIT_AUTHOR_NAME=someone-agents[bot]", "GIT_AUTHOR_NAME=someone-agents[bot]  # the bot", 1)
+	if c := AgentEnv(commented, "", "someone-agents"); !c.Pass {
+		t.Fatalf("comment = %+v", c)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ThePearPoet143/fleet/internal/doctor"
+	"github.com/ThePearPoet143/fleet/internal/files"
 	"github.com/ThePearPoet143/fleet/internal/github"
 	"github.com/ThePearPoet143/fleet/internal/job"
 	"github.com/ThePearPoet143/fleet/internal/settings"
@@ -32,7 +33,11 @@ var (
 	installWait  = 5 * time.Minute
 	installEvery = 3 * time.Second
 	agentJob     = installJob
-	downloads    = func() string {
+	t3Home       = func() string {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".t3")
+	}
+	downloads = func() string {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, "Downloads")
 	}
@@ -69,7 +74,7 @@ func run(args []string, out, errOut io.Writer) int {
 			open = func(url string) { _ = exec.Command("open", url).Start() }
 			piped = false
 		}
-		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), setup.GitHub{User: github.New().User, App: signIn(github.New()), Installation: installation(github.New()), Token: issue(github.New())}, out, errOut); code != 0 {
+		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), setup.GitHub{User: github.New().User, App: signIn(github.New()), Installation: installation(github.New()), Token: issue(github.New()), Bot: github.New().Bot}, out, errOut); code != 0 {
 			return code
 		}
 	}
@@ -130,7 +135,43 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		return 1
 	}
 	fmt.Fprintf(out, "the token job (%s) runs fleet token every %d minutes and at login\n", plist, job.Every/60)
+	if gh.Bot == nil {
+		return 0
+	}
+	if err := serviceEnv(configDir, answers.App.Slug, gh.Bot, out); err != nil {
+		fmt.Fprintln(errOut, "fleet setup: T3's service.env:", err)
+		return 1
+	}
 	return 0
+}
+
+// serviceEnv makes every agent T3 starts act as the bot; T3 applies it on its next start.
+func serviceEnv(configDir, slug string, bot func(string) (int64, error), out io.Writer) error {
+	if _, err := os.Stat(t3Home()); err != nil {
+		fmt.Fprintf(out, "T3 Code isn't set up here (no %s); skipped its service.env\n", t3Home())
+		return nil
+	}
+	id, err := bot(slug)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(t3Home(), "service.env")
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	old, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	merged, changed := setup.MergeEnv(string(old), setup.BotLines(token.Dir(configDir), slug, id))
+	if !changed {
+		return os.Chmod(path, 0o600)
+	}
+	if err := files.Write(path, []byte(merged), 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%s starts agents as %s[bot]; run t3 service restart at the Mac (not over SSH) to apply it\n", path, slug)
+	return nil
 }
 
 // installJob copies this program next to settings and loads the login job that runs it.
@@ -281,7 +322,7 @@ func install(a *settings.Settings, gh setup.GitHub, wait bool, out io.Writer) er
 
 func doctorCmd(out, errOut io.Writer) int {
 	var s settings.Settings
-	hosts, jobBin := "", ""
+	hosts, jobBin, ghDir := "", "", ""
 	checks := []doctor.Check{}
 	if dir, err := os.UserConfigDir(); err != nil {
 		checks = append(checks, doctor.Settings("", false, err))
@@ -293,14 +334,14 @@ func doctorCmd(out, errOut io.Writer) int {
 		if s.App.Installation > 0 {
 			hosts = filepath.Join(token.Dir(dir), "hosts.yml")
 		}
-		jobBin = job.Bin(dir)
+		jobBin, ghDir = job.Bin(dir), token.Dir(dir)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintln(errOut, "fleet doctor:", err)
 		return 2
 	}
-	checks = append(checks, doctor.Mac(home, hosts, jobBin)...)
+	checks = append(checks, doctor.Mac(home, hosts, jobBin, ghDir, s.App.Slug)...)
 	return report(checks, out)
 }
 

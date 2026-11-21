@@ -26,6 +26,8 @@ func server(t *testing.T) *Client {
 			w.Header().Set("X-Ratelimit-Remaining", "0")
 			w.Header().Set("X-Ratelimit-Reset", "1795000000")
 			w.WriteHeader(http.StatusTooManyRequests)
+		case "/users/someone-agents[bot]":
+			w.Write([]byte(`{"login":"someone-agents[bot]","id":7,"type":"Bot"}`))
 		case "/users/root":
 			w.Write([]byte(`{"current_user_url":"https://api.github.com/user"}`))
 		default:
@@ -74,5 +76,15 @@ func TestARateLimitSaysWhenToRetry(t *testing.T) {
 	_, err := server(t).User("limited")
 	if err == nil || !strings.Contains(err.Error(), "rate limit") || !strings.Contains(err.Error(), "2026-11-18") {
 		t.Fatalf("limited error = %v", err)
+	}
+}
+
+func TestBotIsTheAppsBotAccount(t *testing.T) {
+	c := server(t)
+	if id, err := c.Bot("someone-agents"); err != nil || id != 7 || asked != "/users/someone-agents%5Bbot%5D" {
+		t.Fatalf("Bot = %d, %v; asked %q", id, err, asked)
+	}
+	if _, err := c.Bot("nobody"); err == nil || !strings.Contains(err.Error(), "nobody[bot]") {
+		t.Fatalf("no bot: %v", err)
 	}
 }
