@@ -69,8 +69,8 @@ func TestTheFormAsksGitHubOncePerName(t *testing.T) {
 		user("octocat")
 		user("nobody")
 	}
-	if calls != 2 {
-		t.Errorf("%d lookups; want 2", calls)
+	if calls != 4 {
+		t.Errorf("%d lookups; want 4: octocat once, nobody each time", calls)
 	}
 }
 

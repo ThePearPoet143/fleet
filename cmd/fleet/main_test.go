@@ -498,7 +498,7 @@ func TestStoppingTheFormSavesNothing(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
 	code := setupCmd(nil, dir, strings.NewReader(""), setup.Detected{}, setup.GitHub{User: fake}, &out, &errOut)
-	if _, err := os.Stat(settings.Path(dir)); code != 1 || !errors.Is(err, os.ErrNotExist) || !strings.Contains(errOut.String(), "nothing saved") {
+	if _, err := os.Stat(settings.Path(dir)); code != 130 || !errors.Is(err, os.ErrNotExist) || !strings.Contains(errOut.String(), "nothing saved") {
 		t.Fatalf("setup = %d, %q, settings %v", code, errOut.String(), err)
 	}
 }

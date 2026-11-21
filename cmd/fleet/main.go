@@ -110,7 +110,7 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		}
 		if errors.Is(askErr, setup.ErrStopped) {
 			fmt.Fprintln(errOut, "fleet setup:", askErr)
-			return 1
+			return 130 // as a shell reports an interrupt
 		}
 		if askErr == nil {
 			askErr = takeKey(&answers, filepath.Dir(path), out)

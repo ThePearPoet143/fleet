@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -18,16 +19,39 @@ import (
 )
 
 // ErrStopped is a form left with ctrl+c, its only quit key.
-var ErrStopped = errors.New("stopped before the last step; nothing saved")
+var ErrStopped = errors.New("stopped; nothing saved")
 
 // typing is the form's state: the picked answers, and what's typed in each text step.
 type typing struct {
 	A     *settings.Settings
 	Typed map[string]*string
+	mu    *sync.Mutex
+}
+
+// guarded holds an answer behind the form's lock: huh runs titles, hints and placeholders in goroutines.
+type guarded[T any] struct {
+	mu    *sync.Mutex
+	value *T
+}
+
+func (g guarded[T]) Get() T {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return *g.value
+}
+
+func (g guarded[T]) Set(value T) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	*g.value = value
 }
 
 // answers are the settings as they stand, without what's typed in one step; Enter keeps what's shown.
 func (t typing) answers(before settings.Settings, except string) settings.Settings {
+	if t.mu != nil {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+	}
 	s, chosen := *t.A, map[string]bool{}
 	for flag, typed := range t.Typed {
 		if answer := strings.TrimSpace(*typed); answer != "" && flag != except {
@@ -79,25 +103,25 @@ func Hint(st Step, s settings.Settings) string {
 	return strings.Join(parts, "; ")
 }
 
-// remember asks GitHub once per name: huh checks an answer on Enter and again as it moves on.
+// remember asks GitHub once per account found: huh checks an answer on Enter and again as it moves on.
+// A refusal isn't kept, since it may pass on a retry (GitHub's rate limit, the network).
 func remember(user Lookup) Lookup {
-	type answer struct {
-		login string
-		err   error
-	}
-	seen := map[string]answer{}
+	found := map[string]string{}
 	return func(name string) (string, error) {
-		if a, ok := seen[name]; ok {
-			return a.login, a.err
+		if login, ok := found[name]; ok {
+			return login, nil
 		}
 		login, err := user(name)
-		seen[name] = answer{login, err}
+		if err == nil {
+			found[name] = login
+		}
 		return login, err
 	}
 }
 
-// Size is the form's size. huh measures its groups before the titles are filled in, so the height is fixed;
-// the width is huh's own unless the terminal gives none, as huh sizes a text input from it and 0 panics.
+// Size is the form's size. huh measures its groups before the titles are filled in, so the height is fixed,
+// and under 10 rows the form drops its help line to keep the title; the width is huh's own unless the
+// terminal gives none, as huh sizes a text input from it and 0 panics.
 func Size(out io.Writer) (width, height int) {
 	if f, ok := out.(interface{ Fd() uintptr }); ok {
 		if w, h, err := term.GetSize(f.Fd()); err == nil && w > 0 && h > 0 {
@@ -142,7 +166,7 @@ func (f *text) Error() error {
 // Form asks every step in one form, a group per step; shift+tab goes back.
 func Form(a *settings.Settings, user Lookup, open func(url string), in io.Reader, out io.Writer) error {
 	before := *a
-	t := &typing{A: a, Typed: map[string]*string{}}
+	t := &typing{A: a, Typed: map[string]*string{}, mu: &sync.Mutex{}}
 	user = remember(user)
 	opened := ""
 	var groups []*huh.Group
@@ -154,20 +178,25 @@ func Form(a *settings.Settings, user Lookup, open func(url string), in io.Reader
 		var field huh.Field
 		switch st.Kind {
 		case One:
-			field = huh.NewSelect[string]().TitleFunc(title, t).Options(options(st.Options)...).Value(st.Value(a).(*string))
+			field = huh.NewSelect[string]().TitleFunc(title, t).Options(options(st.Options)...).
+				Accessor(guarded[string]{t.mu, st.Value(a).(*string)})
 		case Many:
 			// Without a height, huh v2.0.3 takes the title and description off the options' own height
 			// (field_multiselect.go:504-514), and two options show none.
 			field = huh.NewMultiSelect[string]().TitleFunc(title, t).Description("x or space ticks, Enter confirms").
-				Options(options(st.Options)...).Value(st.Value(a).(*[]string)).Height(2 + len(st.Options))
+				Options(options(st.Options)...).Accessor(guarded[[]string]{t.mu, st.Value(a).(*[]string)}).
+				Height(2 + len(st.Options))
 		case Text:
 			typed := new(string)
 			t.Typed[st.Flag] = typed
 			now := func() settings.Settings { return t.answers(before, st.Flag) }
-			input := huh.NewInput().TitleFunc(title, t).Value(typed).
+			input := huh.NewInput().TitleFunc(title, t).Accessor(guarded[string]{t.mu, typed}).
 				PlaceholderFunc(func() string { return st.Get(now()) }, t).
 				DescriptionFunc(func() string { return Hint(st, now()) }, t).
 				Validate(func(s string) error {
+					if st.Skip != nil && st.Skip(now()) && strings.TrimSpace(s) != "" {
+						return errors.New("there's no app yet: shift+tab back to give it")
+					}
 					if check := st.typed(st.Get(now()), user); check != nil {
 						return check(s)
 					}
@@ -191,7 +220,8 @@ func Form(a *settings.Settings, user Lookup, open func(url string), in io.Reader
 		groups = append(groups, group)
 	}
 	width, height := Size(out)
-	err := huh.NewForm(groups...).WithInput(in).WithOutput(out).WithWidth(width).WithHeight(height).Run()
+	err := huh.NewForm(groups...).WithInput(in).WithOutput(out).WithWidth(width).WithHeight(height).
+		WithShowHelp(height >= 10).Run()
 	if errors.Is(err, huh.ErrUserAborted) {
 		*a = before
 		return ErrStopped
