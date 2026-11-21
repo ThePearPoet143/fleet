@@ -46,7 +46,7 @@ func Parse(args []string) (Flags, error) {
 	fs := flag.NewFlagSet("fleet setup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	for _, st := range Steps {
-		fs.Func(st.Flag, st.Usage, func(answer string) error { return st.Set(&f.Answers, answer) })
+		fs.Func(st.Flag, st.Usage, func(answer string) error { return st.put(&f.Answers, answer, 0) })
 	}
 	fs.BoolVar(&f.Yes, "yes", false, "ask nothing; use flags, current settings and what's detected")
 	if err := fs.Parse(args); err != nil {
@@ -79,18 +79,18 @@ func DeriveApp(slug, oldUser, newUser string) string {
 func Answers(current settings.Settings, f Flags, d Detected) settings.Settings {
 	var out settings.Settings
 	for _, st := range Steps {
-		answer := st.Get(current)
-		saved := answer != ""
+		saved := st.Get(current) != ""
 		if st.Kind == Many {
 			saved = current.Purpose != ""
 		}
 		switch {
 		case f.Set[st.Flag]:
-			answer = st.Get(f.Answers)
+			st.take(&out, f.Answers)
 		case !saved && st.Default != nil:
-			answer = st.Default(d)
+			_ = st.Set(&out, st.Default(d))
+		default:
+			st.take(&out, current)
 		}
-		_ = st.Set(&out, answer)
 	}
 	follow(&out, current, f.Set)
 	if out.App.ID == current.App.ID && strings.EqualFold(out.App.Slug, current.App.Slug) {
@@ -148,7 +148,7 @@ func Check(s, current settings.Settings, gh GitHub) (settings.Settings, error) {
 		if st.Undo != nil {
 			st.Undo(&s, current)
 		} else {
-			_ = st.Set(&s, st.Get(current))
+			st.take(&s, current)
 		}
 	}
 	if !failed["key"] && s.App.Key != "" && s.App.ID > 0 && s.App.Slug != "" {
@@ -157,7 +157,7 @@ func Check(s, current settings.Settings, gh GitHub) (settings.Settings, error) {
 		}
 	}
 	for _, st := range Steps {
-		if st.Skip != nil && st.Skip(s) {
+		if st.Drop && st.Skip(s) {
 			_ = st.Set(&s, "")
 		}
 	}

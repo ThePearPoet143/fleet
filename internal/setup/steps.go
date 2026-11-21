@@ -1,10 +1,12 @@
 // https://pkg.go.dev/flag#FlagSet.Func
+// https://pkg.go.dev/reflect#Value.Set
 package setup
 
 import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -33,7 +35,8 @@ type Step struct {
 	Page    func(settings.Settings) string
 	Need    func(settings.Settings) bool                     // setup isn't done without it
 	Check   func(answer string, user Lookup) (string, error) // GitHub's spelling of it, or why it can't be used
-	Skip    func(settings.Settings) bool                     // not asked, and not kept
+	Skip    func(settings.Settings) bool                     // not asked
+	Drop    bool                                             // a skipped answer isn't kept
 	Undo    func(s *settings.Settings, current settings.Settings)
 }
 
@@ -98,6 +101,7 @@ var Steps = []Step{
 		Value:   func(s *settings.Settings) any { return &s.Reach },
 		Default: func(d Detected) string { return strings.Join(d.Reach, ",") },
 		Skip:    func(s settings.Settings) bool { return s.Use == "shared" },
+		Drop:    true,
 	},
 	{
 		Name: "key", Flag: "key", Usage: "full path to this machine's app key (.pem)", Kind: Text,
@@ -109,15 +113,6 @@ var Steps = []Step{
 			return path, nil
 		},
 	},
-}
-
-func stepFor(flag string) Step {
-	for _, st := range Steps {
-		if st.Flag == flag {
-			return st
-		}
-	}
-	panic("no step " + flag)
 }
 
 // Get is the answer as typed: a list comma-separated, no ID as "".
@@ -136,8 +131,11 @@ func (st Step) Get(s settings.Settings) string {
 	panic("step " + st.Flag + ": no such answer")
 }
 
-// Set keeps a typed answer, reading an ID as flag.Int64Var does.
-func (st Step) Set(s *settings.Settings, answer string) error {
+// Set keeps a typed answer; an ID is read in base 10.
+func (st Step) Set(s *settings.Settings, answer string) error { return st.put(s, answer, 10) }
+
+// put keeps an answer; a flag's ID is read in base 0, as flag.Int64Var does.
+func (st Step) put(s *settings.Settings, answer string, base int) error {
 	switch v := st.Value(s).(type) {
 	case *string:
 		*v = answer
@@ -148,7 +146,7 @@ func (st Step) Set(s *settings.Settings, answer string) error {
 			*v = 0
 			return nil
 		}
-		id, err := strconv.ParseInt(answer, 0, 64)
+		id, err := strconv.ParseInt(answer, base, 64)
 		if errors.Is(err, strconv.ErrRange) {
 			return errors.New("value out of range")
 		} else if err != nil {
@@ -157,6 +155,11 @@ func (st Step) Set(s *settings.Settings, answer string) error {
 		*v = id
 	}
 	return nil
+}
+
+// take copies the answer from other settings as it is, an empty list kept empty.
+func (st Step) take(to *settings.Settings, from settings.Settings) {
+	reflect.ValueOf(st.Value(to)).Elem().Set(reflect.ValueOf(st.Value(&from)).Elem())
 }
 
 func keys(options []Option, sep string) string {
