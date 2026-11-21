@@ -33,5 +33,8 @@ go run ./cmd/fleet setup --github-user <name> --app-id <id> --tools claude,codex
 It checks each answer as you give it: the username on GitHub (public `GET /users/{name}`), at once. The app stays
 private, and GitHub hides a private app from a public lookup, so setup opens the app's settings page and asks for the
 App ID shown there, once (`--app-id`). If an answer fails, setup still saves the ones that passed, and a rerun offers
-them again. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
+them again. Each machine has its own app key, made only on the app's page (Credentials, Key pairs, New key). With no key yet,
+setup says where to click, waits up to five minutes for the new `.pem` in Downloads, and moves it next to settings,
+readable only by you. With a key (taken, or given as `--key`), it signs in as the app (`GET /app` with a JWT) and
+stops if the app's name or owner isn't what you answered. It saves `fleet/settings.toml` in your config folder, readable only by you, then runs the doctor. Settings hold the
 app key's path (`--key`), never the key.

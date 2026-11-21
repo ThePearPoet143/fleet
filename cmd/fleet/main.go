@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -23,8 +24,13 @@ const usage = "usage: fleet doctor | fleet setup [--purpose host|laptop] [--use 
 	"  [--app slug] [--app-id n] [--tools claude,codex] [--reach tailscale,t3,ssh] [--key /full/path.pem] [--yes]"
 
 var (
-	open  = func(url string) {}
-	piped = true
+	open      = func(url string) {}
+	piped     = true
+	keyWait   = 5 * time.Minute
+	downloads = func() string {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "Downloads")
+	}
 )
 
 func main() {
@@ -71,10 +77,21 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 	}
 	answers := setup.Answers(current, f, found)
 	var askErr error
+	had := answers.App.Key
 	if !f.Yes {
 		askErr = setup.Ask(&answers, gh.User, open, in, out, piped)
+		if askErr == nil {
+			askErr = takeKey(&answers, filepath.Dir(path), out)
+		}
+	}
+	taken := ""
+	if had == "" && answers.App.Key != "" {
+		taken = answers.App.Key
 	}
 	answers, checkErr := setup.Check(answers, current, gh)
+	if taken != "" && answers.App.Key == "" {
+		answers.App.Key = taken
+	}
 	checkErr = errors.Join(askErr, checkErr)
 	if err := settings.Save(path, answers); err != nil {
 		fmt.Fprintln(errOut, "fleet setup:", err)
@@ -86,6 +103,22 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		return 1
 	}
 	return 0
+}
+
+func takeKey(a *settings.Settings, dir string, out io.Writer) error {
+	if a.App.Key != "" || a.App.ID <= 0 || a.App.Slug == "" {
+		return nil
+	}
+	start, page := time.Now(), setup.SettingsPage(a.App.Slug)
+	fmt.Fprintf(out, "This machine needs its own key: on %s, under Credentials, Key pairs, click New key.\n", page)
+	fmt.Fprintf(out, "Waiting up to %s for it in %s…\n", keyWait, downloads())
+	open(page)
+	key, err := setup.PickUpKey(downloads(), dir, start, keyWait, time.Second)
+	if key != "" {
+		fmt.Fprintln(out, "kept the key, readable only by you, at", key)
+		a.App.Key = key
+	}
+	return err
 }
 
 func signIn(c *github.Client) setup.SignedApp {
