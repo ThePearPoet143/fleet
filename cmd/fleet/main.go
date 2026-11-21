@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/ThePearPoet143/fleet/internal/doctor"
-	"github.com/ThePearPoet143/fleet/internal/files"
 	"github.com/ThePearPoet143/fleet/internal/github"
 	"github.com/ThePearPoet143/fleet/internal/job"
 	"github.com/ThePearPoet143/fleet/internal/rules"
@@ -100,7 +99,8 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		return 2
 	}
 	answers := setup.Answers(current, f, found)
-	var askErr error
+	w := &work{s: &answers, configDir: configDir, gh: gh, wait: !f.Yes, out: out, errOut: errOut}
+	var askErr, checkErr error // w.s points at answers, so answers is only ever assigned to
 	had := answers.App.Key
 	if !f.Yes {
 		if form {
@@ -113,19 +113,19 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 			return 130 // as a shell reports an interrupt
 		}
 		if askErr == nil {
-			askErr = takeKey(&answers, filepath.Dir(path), out)
+			askErr = keyTask.run(w)
 		}
 	}
 	taken := ""
 	if had == "" && answers.App.Key != "" {
 		taken = answers.App.Key
 	}
-	answers, checkErr := setup.Check(answers, current, gh)
+	answers, checkErr = setup.Check(answers, current, gh)
 	if taken != "" && answers.App.Key == "" {
 		answers.App.Key = taken
 	}
 	if checkErr == nil {
-		checkErr = install(&answers, gh, !f.Yes, out)
+		checkErr = installTask.run(w)
 	}
 	checkErr = errors.Join(askErr, checkErr)
 	if err := settings.Save(path, answers); err != nil {
@@ -137,36 +137,7 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		fmt.Fprintln(errOut, "fleet setup:", checkErr)
 		return 1
 	}
-	code := botSteps(configDir, answers.App, gh, out, errOut)
-	if err := agentRules(configDir, out); err != nil {
-		fmt.Fprintln(errOut, "fleet setup: ci's rules:", err)
-		code = 1
-	}
-	return code
-}
-
-// botSteps refresh the token, install its job and make T3 start agents as the bot, once the app is installed.
-func botSteps(configDir string, app settings.App, gh setup.GitHub, out, errOut io.Writer) int {
-	if gh.Token == nil || app.Installation <= 0 {
-		return 0
-	}
-	if code := tokenCmd(configDir, gh.Token, out, errOut); code != 0 {
-		return code
-	}
-	plist, err := agentJob(configDir)
-	if err != nil {
-		fmt.Fprintln(errOut, "fleet setup: the token job:", err)
-		return 1
-	}
-	fmt.Fprintf(out, "the token job (%s) runs fleet token every %d minutes and at login\n", plist, job.Every/60)
-	if gh.Bot == nil {
-		return 0
-	}
-	if err := serviceEnv(configDir, app.Slug, gh.Bot, out); err != nil {
-		fmt.Fprintln(errOut, "fleet setup: T3's service.env:", err)
-		return 1
-	}
-	return 0
+	return runTasks(tasks(), w)
 }
 
 // installRules keeps fleet's own copy of ci, which agents' rules come from.
@@ -180,35 +151,6 @@ func installRules(configDir string, out io.Writer) error {
 		return string(out), err
 	}
 	return rules.Install(home, configDir, run, out)
-}
-
-// serviceEnv makes every agent T3 starts act as the bot; T3 applies it on its next start.
-func serviceEnv(configDir, slug string, bot func(string) (int64, error), out io.Writer) error {
-	if _, err := os.Stat(t3Home()); err != nil {
-		fmt.Fprintf(out, "T3 Code isn't set up here (no %s); skipped its service.env\n", t3Home())
-		return nil
-	}
-	id, err := bot(slug)
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(t3Home(), "service.env")
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
-	}
-	old, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	merged, changed := setup.MergeEnv(string(old), setup.BotLines(token.Dir(configDir), slug, id))
-	if !changed {
-		return os.Chmod(path, 0o600)
-	}
-	if err := files.Write(path, []byte(merged), 0o600); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "%s starts agents as %s[bot]; run t3 service restart at the Mac (not over SSH) to apply it\n", path, slug)
-	return nil
 }
 
 // installJob copies this program next to settings and loads the login job that runs it.
@@ -358,28 +300,23 @@ func install(a *settings.Settings, gh setup.GitHub, wait bool, out io.Writer) er
 }
 
 func doctorCmd(out, errOut io.Writer) int {
-	var s settings.Settings
-	hosts, jobBin, ghDir, ciCopy := "", "", "", ""
+	var p place
 	checks := []doctor.Check{}
 	if dir, err := os.UserConfigDir(); err != nil {
 		checks = append(checks, doctor.Settings("", false, err))
 	} else {
 		path := settings.Path(dir)
 		loaded, found, err := settings.Load(path)
-		s = loaded
+		p.s, p.configDir = loaded, dir
 		checks = append(checks, doctor.Settings(path, found, err))
-		if s.App.Installation > 0 {
-			hosts = filepath.Join(token.Dir(dir), "hosts.yml")
-		}
-		jobBin, ghDir, ciCopy = job.Bin(dir), token.Dir(dir), rules.Dir(dir)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintln(errOut, "fleet doctor:", err)
 		return 2
 	}
-	checks = append(checks, doctor.Mac(home, hosts, jobBin, ghDir, s.App.Slug, ciCopy)...)
-	return report(checks, out)
+	p.home = home
+	return report(append(checks, checkTasks(tasks(), p)...), out)
 }
 
 func report(checks []doctor.Check, out io.Writer) int {
