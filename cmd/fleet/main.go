@@ -24,10 +24,12 @@ const usage = "usage: fleet doctor | fleet setup [--purpose host|laptop] [--use 
 	"  [--app slug] [--app-id n] [--tools claude,codex] [--reach tailscale,t3,ssh] [--key /full/path.pem] [--yes]"
 
 var (
-	open      = func(url string) {}
-	piped     = true
-	keyWait   = 5 * time.Minute
-	downloads = func() string {
+	open         = func(url string) {}
+	piped        = true
+	keyWait      = 5 * time.Minute
+	installWait  = 5 * time.Minute
+	installEvery = 3 * time.Second
+	downloads    = func() string {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, "Downloads")
 	}
@@ -56,7 +58,7 @@ func run(args []string, out, errOut io.Writer) int {
 			open = func(url string) { _ = exec.Command("open", url).Start() }
 			piped = false
 		}
-		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), setup.GitHub{User: github.New().User, App: signIn(github.New())}, out, errOut); code != 0 {
+		if code := setupCmd(args[1:], dir, os.Stdin, setup.Detect(), setup.GitHub{User: github.New().User, App: signIn(github.New()), Installation: installation(github.New())}, out, errOut); code != 0 {
 			return code
 		}
 	}
@@ -92,6 +94,9 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 	if taken != "" && answers.App.Key == "" {
 		answers.App.Key = taken
 	}
+	if checkErr == nil {
+		checkErr = install(&answers, gh, !f.Yes, out)
+	}
 	checkErr = errors.Join(askErr, checkErr)
 	if err := settings.Save(path, answers); err != nil {
 		fmt.Fprintln(errOut, "fleet setup:", err)
@@ -121,30 +126,75 @@ func takeKey(a *settings.Settings, dir string, out io.Writer) error {
 	return err
 }
 
+func appJWT(key string, id int64) (string, error) {
+	f, err := os.Open(key)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("others can read it; run chmod 600 %s", key)
+	}
+	pemBytes, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	return github.JWT(id, pemBytes, time.Now())
+}
+
 func signIn(c *github.Client) setup.SignedApp {
 	return func(key string, id int64) (string, string, error) {
-		f, err := os.Open(key)
-		if err != nil {
-			return "", "", err
-		}
-		defer f.Close()
-		info, err := f.Stat()
-		if err != nil {
-			return "", "", err
-		}
-		if info.Mode().Perm()&0o077 != 0 {
-			return "", "", fmt.Errorf("others can read it; run chmod 600 %s", key)
-		}
-		pemBytes, err := io.ReadAll(f)
-		if err != nil {
-			return "", "", err
-		}
-		jwt, err := github.JWT(id, pemBytes, time.Now())
+		jwt, err := appJWT(key, id)
 		if err != nil {
 			return "", "", err
 		}
 		app, err := c.App(jwt)
 		return app.Slug, app.Owner, err
+	}
+}
+
+func installation(c *github.Client) func(string, int64, string) (int64, error) {
+	return func(key string, id int64, user string) (int64, error) {
+		jwt, err := appJWT(key, id)
+		if err != nil {
+			return 0, err
+		}
+		return c.Installation(jwt, user)
+	}
+}
+
+func install(a *settings.Settings, gh setup.GitHub, wait bool, out io.Writer) error {
+	if a.App.Key == "" || a.App.ID <= 0 || a.GitHub.User == "" || gh.Installation == nil {
+		return nil
+	}
+	page := setup.SettingsPage(a.App.Slug)
+	deadline := time.Now().Add(installWait)
+	for asked := false; ; time.Sleep(installEvery) {
+		id, err := gh.Installation(a.App.Key, a.App.ID, a.GitHub.User)
+		if err == nil {
+			a.App.Installation = id
+			return nil
+		}
+		late := !wait || time.Now().After(deadline)
+		if !errors.Is(err, github.ErrNotInstalled) {
+			if late || !asked {
+				return err
+			}
+			continue
+		}
+		a.App.Installation = 0
+		if late {
+			return fmt.Errorf("the app isn't installed on your account: on %s, click Install App, then rerun setup", page)
+		}
+		if !asked {
+			fmt.Fprintf(out, "On %s, click Install App; waiting up to %s…\n", page, installWait)
+			open(page)
+			asked = true
+		}
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ThePearPoet143/fleet/internal/doctor"
+	"github.com/ThePearPoet143/fleet/internal/github"
 	"github.com/ThePearPoet143/fleet/internal/settings"
 	"github.com/ThePearPoet143/fleet/internal/setup"
 )
@@ -123,7 +124,7 @@ func TestSetupTakesTheNewKeyFromDownloadsAndSignsInWithIt(t *testing.T) {
 	gh := setup.GitHub{User: fake, App: func(key string, id int64) (string, string, error) {
 		signedWith = key
 		return "someone-agents", "someone", nil
-	}}
+	}, Installation: func(string, int64, string) (int64, error) { return 99, nil }}
 	var out, errOut bytes.Buffer
 	code := setupCmd(nil, dir, strings.NewReader("1\n1\nsomeone\n\n\n42\n\n"), setup.Detected{}, gh, &out, &errOut)
 	s, _, _ := settings.Load(settings.Path(dir))
@@ -147,19 +148,72 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	downloads, keyWait = func() string { return dl }, 0
+	downloads, keyWait, installWait = func() string { return dl }, 0, 0
 	code := m.Run()
 	os.RemoveAll(dl)
 	os.Exit(code)
 }
 
 func keyed(t *testing.T) (string, setup.GitHub) {
+	gh := setup.GitHub{User: fake, App: func(string, int64) (string, string, error) { return "someone-agents", "someone", nil },
+		Installation: func(string, int64, string) (int64, error) { return 99, nil }}
+	if t == nil {
+		return "", gh
+	}
 	t.Helper()
 	key := filepath.Join(t.TempDir(), "a.pem")
 	if err := os.WriteFile(key, []byte("key"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return key, setup.GitHub{User: fake, App: func(string, int64) (string, string, error) { return "someone-agents", "someone", nil }}
+	return key, gh
+}
+
+func installed(after int) (setup.GitHub, *int) {
+	_, gh := keyed(nil)
+	calls := 0
+	gh.Installation = func(key string, id int64, user string) (int64, error) {
+		calls++
+		if calls <= after {
+			return 0, github.ErrNotInstalled
+		}
+		return 99, nil
+	}
+	return gh, &calls
+}
+
+func TestSetupSavesTheInstallation(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := keyed(t)
+	gh, _ := installed(0)
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	if s, _, _ := settings.Load(settings.Path(dir)); code != 0 || s.App.Installation != 99 {
+		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s.App)
+	}
+}
+
+func TestSetupWaitsForTheAppToBeInstalled(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := keyed(t)
+	gh, calls := installed(2)
+	waitForInstall(t, time.Second)
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	if s, _, _ := settings.Load(settings.Path(dir)); code != 0 || s.App.Installation != 99 || *calls != 3 || !strings.Contains(out.String(), "Install App") {
+		t.Fatalf("setup = %d, %q, %d calls; saved %+v\n%s", code, errOut.String(), *calls, s.App, out.String())
+	}
+}
+
+func TestSetupWithYesSaysWhereToInstallTheApp(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := keyed(t)
+	gh, _ := installed(100)
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	s, _, _ := settings.Load(settings.Path(dir))
+	if code != 1 || !strings.Contains(errOut.String(), "https://github.com/settings/apps/someone-agents") || s.App.ID != 42 || s.App.Installation != 0 {
+		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s.App)
+	}
 }
 
 func useDownloads(t *testing.T, dir string, wait time.Duration) {
@@ -190,5 +244,38 @@ func TestAKeyTakenThisRunIsKeptWhenSignInFails(t *testing.T) {
 	s, _, _ := settings.Load(settings.Path(dir))
 	if code != 1 || s.App.Key != filepath.Join(dir, "fleet", "someone-agents.2026-11-20.private-key.pem") {
 		t.Fatalf("setup = %d, %q; saved %+v", code, errOut.String(), s.App)
+	}
+}
+
+func waitForInstall(t *testing.T, wait time.Duration) {
+	oldWait, oldEvery := installWait, installEvery
+	installWait, installEvery = wait, time.Millisecond
+	t.Cleanup(func() { installWait, installEvery = oldWait, oldEvery })
+}
+
+func TestABriefErrorWhileWaitingIsRetried(t *testing.T) {
+	waitForInstall(t, time.Second)
+	calls := 0
+	gh := setup.GitHub{Installation: func(string, int64, string) (int64, error) {
+		calls++
+		switch calls {
+		case 1:
+			return 0, github.ErrNotInstalled
+		case 2:
+			return 0, errors.New("GitHub answered 502 Bad Gateway")
+		}
+		return 99, nil
+	}}
+	a := settings.Settings{GitHub: settings.GitHub{User: "someone"}, App: settings.App{ID: 42, Slug: "s", Key: "/k.pem"}}
+	if err := install(&a, gh, true, &bytes.Buffer{}); err != nil || a.App.Installation != 99 {
+		t.Fatalf("install = %v, %+v", err, a.App)
+	}
+}
+
+func TestAnErrorOtherThanNotInstalledKeepsTheSavedInstallation(t *testing.T) {
+	gh := setup.GitHub{Installation: func(string, int64, string) (int64, error) { return 0, errors.New("timeout") }}
+	a := settings.Settings{GitHub: settings.GitHub{User: "someone"}, App: settings.App{ID: 42, Installation: 99, Slug: "s", Key: "/k.pem"}}
+	if err := install(&a, gh, false, &bytes.Buffer{}); err == nil || a.App.Installation != 99 {
+		t.Fatalf("install = %v, %+v", err, a.App)
 	}
 }

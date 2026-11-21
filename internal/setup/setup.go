@@ -109,6 +109,9 @@ func Answers(current settings.Settings, f Flags, d Detected) settings.Settings {
 	if !f.Set["app-id"] && !strings.EqualFold(out.App.Slug, current.App.Slug) {
 		out.App.ID = 0
 	}
+	if out.App.ID == current.App.ID && strings.EqualFold(out.App.Slug, current.App.Slug) {
+		out.App.Installation = current.App.Installation
+	}
 	return out
 }
 
@@ -142,8 +145,9 @@ type Lookup func(name string) (string, error)
 type SignedApp func(key string, id int64) (slug, owner string, err error)
 
 type GitHub struct {
-	User Lookup
-	App  SignedApp
+	User         Lookup
+	App          SignedApp
+	Installation func(key string, id int64, user string) (int64, error)
 }
 
 func SettingsPage(slug string) string {

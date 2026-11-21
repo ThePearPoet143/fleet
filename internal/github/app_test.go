@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,5 +77,29 @@ func TestAppSignsInAndReturnsItsNameAndOwner(t *testing.T) {
 	}
 	if _, err := c.App("bad"); err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("bad key: %v", err)
+	}
+}
+
+func TestInstallationIsFoundSignedAsTheApp(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Header.Get("Authorization") != "Bearer good":
+			w.WriteHeader(http.StatusUnauthorized)
+		case r.URL.EscapedPath() == "/users/someone/installation":
+			w.Write([]byte(`{"id":99,"account":{"login":"someone"}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer s.Close()
+	c := &Client{Base: s.URL, HTTP: s.Client()}
+	if id, err := c.Installation("good", "someone"); err != nil || id != 99 {
+		t.Fatalf("Installation = %d, %v", id, err)
+	}
+	if _, err := c.Installation("good", "other"); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("not installed: %v", err)
+	}
+	if _, err := c.Installation("bad", "someone"); err == nil || errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("bad JWT: %v", err)
 	}
 }
