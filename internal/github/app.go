@@ -1,6 +1,7 @@
 // https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app
 // https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app
 // https://docs.github.com/en/rest/apps/apps#get-a-user-installation-for-the-authenticated-app
+// https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app
 // https://pkg.go.dev/crypto/rsa#SignPKCS1v15
 package github
 
@@ -14,6 +15,8 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -67,7 +70,7 @@ func (c *Client) App(jwt string) (App, error) {
 		Slug  string
 		Owner struct{ Login string }
 	}
-	if err := c.call("/app", jwt, "GitHub found no app for this key", &app); err != nil {
+	if err := c.call(http.MethodGet, "/app", jwt, "GitHub found no app for this key", &app); err != nil {
 		return App{}, err
 	}
 	return App{app.ID, app.Slug, app.Owner.Login}, nil
@@ -75,7 +78,7 @@ func (c *Client) App(jwt string) (App, error) {
 
 func (c *Client) Installation(jwt, user string) (int64, error) {
 	var inst struct{ ID int64 }
-	err := c.call("/users/"+url.PathEscape(user)+"/installation", jwt, "not installed", &inst)
+	err := c.call(http.MethodGet, "/users/"+url.PathEscape(user)+"/installation", jwt, "not installed", &inst)
 	var missing notFound
 	if errors.As(err, &missing) {
 		return 0, ErrNotInstalled
@@ -84,6 +87,18 @@ func (c *Client) Installation(jwt, user string) (int64, error) {
 		err = errors.New("GitHub gave no installation")
 	}
 	return inst.ID, err
+}
+
+func (c *Client) Token(jwt string, installation int64) (string, error) {
+	var answer struct{ Token string }
+	path := "/app/installations/" + strconv.FormatInt(installation, 10) + "/access_tokens"
+	if err := c.call(http.MethodPost, path, jwt, fmt.Sprintf("GitHub has no installation %d for this app", installation), &answer); err != nil {
+		return "", err
+	}
+	if answer.Token == "" {
+		return "", errors.New("GitHub answered with no token")
+	}
+	return answer.Token, nil
 }
 
 func CheckKey(pemBytes []byte) error {

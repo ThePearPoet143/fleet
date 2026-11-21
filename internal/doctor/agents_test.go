@@ -38,6 +38,9 @@ func TestAgentTokenPassesOnlyATokenWrittenInTheLastHour(t *testing.T) {
 	if AgentToken(true, now.Add(-70*time.Minute), now).Pass || AgentToken(false, now, now).Pass {
 		t.Error("old or missing passed")
 	}
+	if c := AgentToken(false, now, now); c.Fix != "fleet token" {
+		t.Errorf("fix = %q", c.Fix)
+	}
 }
 
 func TestDevFolderPassesOnlyADevFolderHoldingFleet(t *testing.T) {

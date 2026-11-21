@@ -28,11 +28,11 @@ func (c *Client) get(kind, name, missing string, v any) error {
 	if name == "" || name == "." || name == ".." {
 		return fmt.Errorf("%q isn't a GitHub name", name)
 	}
-	return c.call("/"+kind+"/"+url.PathEscape(name), "", missing, v)
+	return c.call(http.MethodGet, "/"+kind+"/"+url.PathEscape(name), "", missing, v)
 }
 
-func (c *Client) call(path, jwt, missing string, v any) error {
-	req, err := http.NewRequest(http.MethodGet, c.Base+path, nil)
+func (c *Client) call(method, path, jwt, missing string, v any) error {
+	req, err := http.NewRequest(method, c.Base+path, nil)
 	if err != nil {
 		return err
 	}
@@ -46,7 +46,7 @@ func (c *Client) call(path, jwt, missing string, v any) error {
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
-	case http.StatusOK:
+	case http.StatusOK, http.StatusCreated:
 		return json.NewDecoder(resp.Body).Decode(v)
 	case http.StatusNotFound:
 		return notFound(missing)

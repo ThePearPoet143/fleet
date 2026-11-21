@@ -36,7 +36,7 @@ func AgentEnv(serviceEnv string) Check {
 }
 
 func AgentToken(exists bool, written, now time.Time) Check {
-	return Check{"agents' GitHub token fresh", exists && now.Sub(written) < time.Hour, "pwsh -File ~/dev/fleet-ps/identity/Update-AgentToken.ps1"}
+	return Check{"agents' GitHub token fresh", exists && now.Sub(written) < time.Hour, "fleet token"}
 }
 
 func DevFolder(exists bool, entries []string) Check {

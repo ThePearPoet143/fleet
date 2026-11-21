@@ -279,3 +279,50 @@ func TestAnErrorOtherThanNotInstalledKeepsTheSavedInstallation(t *testing.T) {
 		t.Fatalf("install = %v, %+v", err, a.App)
 	}
 }
+
+func TestTokenWritesTheBotsLoginWithoutPrintingIt(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := keyed(t)
+	s := settings.Settings{GitHub: settings.GitHub{User: "someone"}, App: settings.App{ID: 42, Installation: 99, Slug: "someone-agents", Key: key}}
+	if err := settings.Save(settings.Path(dir), s); err != nil {
+		t.Fatal(err)
+	}
+	var asked [2]any
+	issue := func(k string, id, inst int64) (string, error) {
+		asked = [2]any{k, inst}
+		return "ghs_secret", nil
+	}
+	var out, errOut bytes.Buffer
+	if code := tokenCmd(dir, issue, &out, &errOut); code != 0 || asked != [2]any{key, int64(99)} {
+		t.Fatalf("token = %d, %q; asked %v", code, errOut.String(), asked)
+	}
+	hosts, err := os.ReadFile(filepath.Join(dir, "fleet", "gh", "hosts.yml"))
+	if err != nil || !strings.Contains(string(hosts), "oauth_token: ghs_secret") || !strings.Contains(string(hosts), "user: someone-agents[bot]") {
+		t.Fatalf("hosts.yml = %q, %v", hosts, err)
+	}
+	if strings.Contains(out.String()+errOut.String(), "ghs_secret") || !strings.Contains(out.String(), "token refreshed") {
+		t.Fatalf("printed %q %q", out.String(), errOut.String())
+	}
+}
+
+func TestTokenNeedsSetupFirstAndKeepsTheOldLogin(t *testing.T) {
+	dir := t.TempDir()
+	if err := settings.Save(settings.Path(dir), settings.Settings{App: settings.App{ID: 42, Slug: "someone-agents", Key: "/k.pem"}}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	issue := func(string, int64, int64) (string, error) { return "", errors.New("GitHub answered 401") }
+	if code := tokenCmd(dir, issue, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "fleet setup") {
+		t.Fatalf("no installation = %d, %q", code, errOut.String())
+	}
+	s, _, _ := settings.Load(settings.Path(dir))
+	s.App.Installation = 99
+	settings.Save(settings.Path(dir), s)
+	errOut.Reset()
+	if code := tokenCmd(dir, issue, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "failed: GitHub answered 401") {
+		t.Fatalf("refused = %d, %q", code, errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "fleet", "gh", "hosts.yml")); err == nil {
+		t.Fatal("a failed refresh wrote a login")
+	}
+}

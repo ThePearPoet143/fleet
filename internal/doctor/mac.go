@@ -50,7 +50,7 @@ func statusCode(url string) int {
 	return resp.StatusCode
 }
 
-func Mac(home, githubUser string) []Check {
+func Mac(home, hosts string) []Check {
 	checks := []Check{
 		Tool("Homebrew", find("brew"), "see https://brew.sh"),
 		Tool("git", find("git"), "xcode-select --install"),
@@ -73,15 +73,15 @@ func Mac(home, githubUser string) []Check {
 			T3Answers(statusCode(fmt.Sprintf("http://127.0.0.1:%d/", port)), port),
 			AgentEnv(env))
 	}
-	checks = append(checks, token(home, githubUser), NoSleep(output("pmset", "-g")))
+	checks = append(checks, token(hosts), NoSleep(output("pmset", "-g")))
 	return append(checks, devFolder(home), sharedRules(home))
 }
 
-func token(home, githubUser string) Check {
-	if githubUser == "" {
-		return Check{"agents' GitHub token fresh (no GitHub user in settings)", false, "fleet setup"}
+func token(hosts string) Check {
+	if hosts == "" {
+		return Check{"agents' GitHub token fresh (no app installation in settings)", false, "fleet setup"}
 	}
-	info, err := os.Stat(filepath.Join(home, ".people", githubUser, "agents", "gh", "hosts.yml"))
+	info, err := os.Stat(hosts)
 	if err != nil {
 		return AgentToken(false, time.Now(), time.Now())
 	}
