@@ -35,32 +35,12 @@ func Keep(typed, now string) string {
 	return now
 }
 
+// skip tells that Enter passes a checked question that has no answer yet.
 func skip(now string) string {
 	if now == "" {
 		return " (Enter skips it for now)"
 	}
 	return ""
-}
-
-func onGitHub(now string, user Lookup) func(string) error {
-	return func(s string) error {
-		name := Keep(s, now)
-		if name == "" {
-			return nil
-		}
-		_, err := user(name)
-		return err
-	}
-}
-
-func appID(now string) func(string) error {
-	return func(s string) error {
-		if Keep(s, now) == "" {
-			return nil
-		}
-		_, err := AppID(Keep(s, now))
-		return err
-	}
 }
 
 type form struct {
@@ -93,8 +73,8 @@ func (f form) ask(field huh.Field, check func(string) error, emptyAs string) (er
 	return huh.NewForm(huh.NewGroup(field)).WithAccessible(true).WithInput(f.in).WithOutput(f.out).Run()
 }
 
-func (f form) pick(title, now string, list []Option, value *string) error {
-	field := huh.NewSelect[string]().Title(Title(title, now)).Options(options(list)...).Value(value)
+func (f form) pick(title string, list []Option, value *string) error {
+	field := huh.NewSelect[string]().Title(title).Options(options(list)...).Value(value)
 	return f.ask(field, number(1, len(list)), "")
 }
 
@@ -111,55 +91,47 @@ func (f form) text(title string, check func(string) error, value *string) error 
 	return f.ask(field, check, "")
 }
 
+// Ask asks each step in turn; a typed answer is checked as it's given.
 func Ask(a *settings.Settings, user Lookup, open func(url string), in io.Reader, out io.Writer, strict bool) error {
 	f := form{NewLines(in), out}
 	f.in.Strict = strict
-	name, app := "", ""
-	oldUser, oldSlug := a.GitHub.User, a.App.Slug
-	if err := f.pick("What is this machine for?", a.Purpose, Purposes, &a.Purpose); err != nil {
-		return err
+	before, asked := *a, map[string]bool{}
+	for _, st := range Steps {
+		if st.Title == "" || (st.Skip != nil && st.Skip(*a)) {
+			continue
+		}
+		if err := f.step(st, a, user, open); err != nil {
+			return err
+		}
+		asked[st.Flag] = true
+		follow(a, before, asked)
 	}
-	if err := f.pick("Is it personal or shared?", a.Use, Uses, &a.Use); err != nil {
-		return err
-	}
-	if err := f.text(Title("Your GitHub username", a.GitHub.User)+skip(a.GitHub.User), onGitHub(a.GitHub.User, user), &name); err != nil {
-		return err
-	}
-	a.GitHub.User = Keep(name, a.GitHub.User)
-	a.App.Slug = DeriveApp(a.App.Slug, oldUser, a.GitHub.User)
-	if err := f.text(Title("Your agents' GitHub App, as in its URL", a.App.Slug), nil, &app); err != nil {
-		return err
-	}
-	if err := f.choose("AI tools on this machine", Tools, &a.Tools); err != nil {
-		return err
-	}
-	a.App.Slug = Keep(app, a.App.Slug)
-	if !strings.EqualFold(a.App.Slug, oldSlug) {
-		a.App.ID = 0
-	}
-	if err := f.askID(a, open); err != nil {
-		return err
-	}
-	if a.Use == "shared" {
-		return nil
-	}
-	return f.choose("How is it reached?", Reaches, &a.Reach)
+	return nil
 }
 
-func (f form) askID(a *settings.Settings, open func(url string)) error {
-	if a.App.Slug == "" {
-		return nil
+func (f form) step(st Step, a *settings.Settings, user Lookup, open func(url string)) error {
+	now := st.Get(*a)
+	switch st.Kind {
+	case One:
+		return f.pick(Title(st.Title, now), st.Options, st.Value(a).(*string))
+	case Many:
+		return f.choose(st.Title, st.Options, st.Value(a).(*[]string))
 	}
-	id, now := "", ""
-	if a.App.ID > 0 {
-		now = strconv.FormatInt(a.App.ID, 10)
-	} else {
-		open(SettingsPage(a.App.Slug))
+	title := st.Title
+	if st.Page != nil {
+		if now == "" {
+			open(st.Page(*a))
+		}
+		title += ", shown on " + st.Page(*a)
 	}
-	title := Title("Your app's App ID, shown on "+SettingsPage(a.App.Slug), now) + skip(now)
-	if err := f.text(title, appID(now), &id); err != nil {
+	title = Title(title, now)
+	if st.Check != nil {
+		title += skip(now)
+	}
+	typed := ""
+	if err := f.text(title, st.typed(now, user), &typed); err != nil {
 		return err
 	}
-	a.App.ID = KeepID(id, a.App.ID)
+	_ = st.Set(a, Keep(typed, now))
 	return nil
 }
