@@ -149,6 +149,7 @@ type GitHub struct {
 	App          SignedApp
 	Installation func(key string, id int64, user string) (int64, error)
 	Token        func(key string, id, installation int64) (string, error)
+	Bot          func(slug string) (int64, error)
 }
 
 func SettingsPage(slug string) string {

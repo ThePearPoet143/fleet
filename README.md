@@ -57,3 +57,21 @@ and at login (`StartInterval` 1800, `RunAtLoad`). The job runs a fixed copy of f
 settings, not a build agents work on, and logs to `fleet/token.log`. Login jobs start only at the Mac, not over SSH
 (`launchctl bootstrap gui/<uid>`). The doctor checks that the job runs `fleet token`. Undo:
 `launchctl bootout gui/$(id -u)/dev.fleet.agent-token`, then remove `~/Library/LaunchAgents/dev.fleet.agent-token.plist`.
+
+## Agents act as the bot
+
+Setup then makes every agent T3 Code starts act as the app's bot, never as you: it sets five lines in
+`~/.t3/service.env`, in place of old values and keeping your other lines, readable only by you. The login folder's
+full path is quoted, since T3 doesn't expand `~` and the path has a space; the bot's ID comes from
+`GET /users/<app>[bot]`.
+
+```dotenv
+GH_CONFIG_DIR="/Users/<you>/Library/Application Support/fleet/gh"
+GIT_AUTHOR_NAME=<app>[bot]
+GIT_AUTHOR_EMAIL=<bot ID>+<app>[bot]@users.noreply.github.com
+GIT_COMMITTER_NAME=<app>[bot]
+GIT_COMMITTER_EMAIL=<bot ID>+<app>[bot]@users.noreply.github.com
+```
+
+T3 reads the file when it starts, and a restart stops running agents, so setup leaves `t3 service restart` to you, at
+the Mac. The doctor checks the lines name fleet's login and your app. What you run in a plain terminal stays you.
