@@ -17,6 +17,7 @@ import (
 	"github.com/ThePearPoet143/fleet/internal/files"
 	"github.com/ThePearPoet143/fleet/internal/github"
 	"github.com/ThePearPoet143/fleet/internal/job"
+	"github.com/ThePearPoet143/fleet/internal/rules"
 	"github.com/ThePearPoet143/fleet/internal/settings"
 	"github.com/ThePearPoet143/fleet/internal/setup"
 	"github.com/ThePearPoet143/fleet/internal/system"
@@ -33,6 +34,7 @@ var (
 	installWait  = 5 * time.Minute
 	installEvery = 3 * time.Second
 	agentJob     = installJob
+	agentRules   = installRules
 	t3Home       = func() string {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, ".t3")
@@ -123,6 +125,10 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		fmt.Fprintln(errOut, "fleet setup:", checkErr)
 		return 1
 	}
+	if err := agentRules(configDir, out); err != nil {
+		fmt.Fprintln(errOut, "fleet setup: ci's rules:", err)
+		return 1
+	}
 	if gh.Token == nil || answers.App.Installation <= 0 {
 		return 0
 	}
@@ -143,6 +149,19 @@ func setupCmd(args []string, configDir string, in io.Reader, found setup.Detecte
 		return 1
 	}
 	return 0
+}
+
+// installRules keeps fleet's own copy of ci, which agents' rules come from.
+func installRules(configDir string, out io.Writer) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	run := func(name string, args ...string) (string, error) {
+		out, err := exec.Command(name, args...).CombinedOutput()
+		return string(out), err
+	}
+	return rules.Install(home, configDir, run, out)
 }
 
 // serviceEnv makes every agent T3 starts act as the bot; T3 applies it on its next start.
@@ -322,7 +341,7 @@ func install(a *settings.Settings, gh setup.GitHub, wait bool, out io.Writer) er
 
 func doctorCmd(out, errOut io.Writer) int {
 	var s settings.Settings
-	hosts, jobBin, ghDir := "", "", ""
+	hosts, jobBin, ghDir, ciCopy := "", "", "", ""
 	checks := []doctor.Check{}
 	if dir, err := os.UserConfigDir(); err != nil {
 		checks = append(checks, doctor.Settings("", false, err))
@@ -334,14 +353,14 @@ func doctorCmd(out, errOut io.Writer) int {
 		if s.App.Installation > 0 {
 			hosts = filepath.Join(token.Dir(dir), "hosts.yml")
 		}
-		jobBin, ghDir = job.Bin(dir), token.Dir(dir)
+		jobBin, ghDir, ciCopy = job.Bin(dir), token.Dir(dir), rules.Dir(dir)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintln(errOut, "fleet doctor:", err)
 		return 2
 	}
-	checks = append(checks, doctor.Mac(home, hosts, jobBin, ghDir, s.App.Slug)...)
+	checks = append(checks, doctor.Mac(home, hosts, jobBin, ghDir, s.App.Slug, ciCopy)...)
 	return report(checks, out)
 }
 

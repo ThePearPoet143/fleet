@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ThePearPoet143/fleet/internal/rules"
 )
 
 func find(name string) string {
@@ -50,7 +52,7 @@ func statusCode(url string) int {
 	return resp.StatusCode
 }
 
-func Mac(home, hosts, jobBin, ghDir, slug string) []Check {
+func Mac(home, hosts, jobBin, ghDir, slug, ciCopy string) []Check {
 	checks := []Check{
 		Tool("Homebrew", find("brew"), "see https://brew.sh"),
 		Tool("git", find("git"), "xcode-select --install"),
@@ -76,7 +78,7 @@ func Mac(home, hosts, jobBin, ghDir, slug string) []Check {
 	checks = append(checks, token(hosts),
 		TokenJob(output("launchctl", "print", fmt.Sprintf("gui/%d/dev.fleet.agent-token", os.Getuid())), jobBin),
 		NoSleep(output("pmset", "-g")))
-	return append(checks, devFolder(home), sharedRules(home))
+	return append(checks, devFolder(home), sharedRules(home, ciCopy))
 }
 
 func token(hosts string) Check {
@@ -102,15 +104,16 @@ func devFolder(home string) Check {
 	return DevFolder(err == nil, names)
 }
 
-func sharedRules(home string) Check {
-	ci := filepath.Join(home, "dev", "ci")
-	behind := 1
-	if exists(ci) {
-		exec.Command("git", "-C", ci, "fetch", "-q", "origin", "dev").Run()
-		if n, err := strconv.Atoi(strings.TrimSpace(output("git", "-C", ci, "rev-list", "--count", "HEAD..origin/dev"))); err == nil {
+func sharedRules(home, ciCopy string) Check {
+	rulesFile := filepath.Join(ciCopy, "agents", "rules.md")
+	behind := -1
+	if ciCopy != "" && exists(rulesFile) {
+		behind = 1
+		exec.Command("git", "-C", ciCopy, "fetch", "-q", "origin").Run()
+		if n, err := strconv.Atoi(strings.TrimSpace(output("git", "-C", ciCopy, "rev-list", "--count", "HEAD..@{upstream}"))); err == nil {
 			behind = n
 		}
 	}
 	target, _ := os.Readlink(filepath.Join(home, ".codex", "AGENTS.md"))
-	return SharedRules(read(filepath.Join(home, ".claude", "CLAUDE.md")), target, filepath.Join(ci, "agents", "rules.md"), behind)
+	return SharedRules(read(filepath.Join(home, ".claude", "CLAUDE.md")), rules.Import(home, rulesFile), target, rulesFile, behind)
 }

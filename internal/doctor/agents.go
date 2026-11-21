@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 	"time"
-)
 
-const RulesImport = "@~/dev/ci/agents/rules.md"
+	"github.com/ThePearPoet143/fleet/internal/rules"
+)
 
 var envLine = regexp.MustCompile(`(?m)^[ \t]*(?:export[ \t]+)?([A-Z_]+)[ \t]*=[ \t]*(.*)$`)
 
@@ -80,20 +80,28 @@ func DevFolder(exists bool, entries []string) Check {
 	return Check{"repos in ~/dev", exists && slices.Contains(entries, "fleet"), "mkdir -p ~/dev && cd ~/dev && gh repo clone ThePearPoet143/fleet"}
 }
 
-func SharedRules(claudeMd, codexTarget, rules string, behind int) Check {
+// SharedRules: behind is how far fleet's copy of ci is behind, or -1 when there's no copy.
+func SharedRules(claudeMd, imp, codexTarget, rulesFile string, behind int) Check {
 	var gaps []string
-	if !slices.Contains(strings.Split(strings.ReplaceAll(claudeMd, "\r\n", "\n"), "\n"), RulesImport) {
+	claude := strings.Split(strings.ReplaceAll(claudeMd, "\r\n", "\n"), "\n")
+	if !slices.Contains(claude, imp) {
 		gaps = append(gaps, "Claude doesn't import them")
 	}
-	if codexTarget != rules {
+	if slices.Contains(claude, rules.Old) {
+		gaps = append(gaps, "Claude still imports the work clone's")
+	}
+	if codexTarget != rulesFile {
 		gaps = append(gaps, "Codex doesn't link them")
 	}
-	if behind > 0 {
-		gaps = append(gaps, fmt.Sprintf("~/dev/ci is %d behind", behind))
+	switch {
+	case behind < 0:
+		gaps = append(gaps, "no rules copy")
+	case behind > 0:
+		gaps = append(gaps, fmt.Sprintf("the copy is %d behind", behind))
 	}
 	name := "agents have ci's rules"
 	if gaps != nil {
 		name += " (" + strings.Join(gaps, "; ") + ")"
 	}
-	return Check{name, gaps == nil, "pwsh -File ~/dev/fleet-ps/rules/Install-SharedRules.ps1"}
+	return Check{name, gaps == nil, "fleet setup"}
 }
