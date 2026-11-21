@@ -6,15 +6,6 @@ import (
 	"github.com/ThePearPoet143/fleet/internal/settings"
 )
 
-func stepFor(flag string) Step {
-	for _, st := range Steps {
-		if st.Flag == flag {
-			return st
-		}
-	}
-	panic("no step " + flag)
-}
-
 func TestEveryStepKeepsWhatItIsGiven(t *testing.T) {
 	answers := map[Kind]string{One: "", Many: "", Text: "/a/b"}
 	flags := map[string]bool{}
