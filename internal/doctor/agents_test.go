@@ -77,3 +77,19 @@ func TestAgentEnvTreatsAnEmptyValueAsMissingNotTheNextLine(t *testing.T) {
 		t.Errorf("empty email = %+v", c)
 	}
 }
+
+// launchctl print gui/501/dev.fleet.agent-token on a Mac host, 2026-11-20 (fleet-ps's job)
+const psJob = "gui/501/dev.fleet.agent-token = {\n\tactive count = 0\n\tpath = /Users/me/Library/LaunchAgents/dev.fleet.agent-token.plist\n\ttype = LaunchAgent\n\tstate = not running\n\n\tprogram = /opt/homebrew/bin/pwsh\n\targuments = {\n\t\t/opt/homebrew/bin/pwsh\n\t\t-NoProfile\n\t\t-File\n\t\t/Users/me/.people/owner/agents/bin/Update-AgentToken.ps1\n\t}\n"
+
+func TestTokenJobPassesOnlyAJobRunningFleetToken(t *testing.T) {
+	bin := "/Users/me/Library/Application Support/fleet/bin/fleet"
+	good := "gui/501/dev.fleet.agent-token = {\n\tstate = not running\n\n\tprogram = " + bin + "\n\targuments = {\n\t\t" + bin + "\n\t\ttoken\n\t}\n"
+	if c := TokenJob(good, bin); !c.Pass {
+		t.Errorf("good = %+v", c)
+	}
+	for name, out := range map[string]string{"fleet-ps's": psJob, "none": "Bad request.\nCould not find service \"dev.fleet.agent-token\" in domain for user gui: 501\n"} {
+		if c := TokenJob(out, bin); c.Pass || !strings.Contains(c.Fix, "fleet setup") {
+			t.Errorf("%s = %+v", name, c)
+		}
+	}
+}

@@ -51,3 +51,9 @@ app key's path (`--key`), never the key.
 ```
 go run ./cmd/fleet token
 ```
+
+Setup ends by running it once, then installs a login job, `dev.fleet.agent-token`, that runs it every 30 minutes
+and at login (`StartInterval` 1800, `RunAtLoad`). The job runs a fixed copy of fleet, `fleet/bin/fleet` next to
+settings, not a build agents work on, and logs to `fleet/token.log`. Login jobs start only at the Mac, not over SSH
+(`launchctl bootstrap gui/<uid>`). The doctor checks that the job runs `fleet token`. Undo:
+`launchctl bootout gui/$(id -u)/dev.fleet.agent-token`, then remove `~/Library/LaunchAgents/dev.fleet.agent-token.plist`.

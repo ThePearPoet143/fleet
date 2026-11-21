@@ -149,6 +149,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	downloads, keyWait, installWait = func() string { return dl }, 0, 0
+	agentJob = func(string) (string, error) { panic("a test installed the real job") }
 	code := m.Run()
 	os.RemoveAll(dl)
 	os.Exit(code)
@@ -325,4 +326,56 @@ func TestTokenNeedsSetupFirstAndKeepsTheOldLogin(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "fleet", "gh", "hosts.yml")); err == nil {
 		t.Fatal("a failed refresh wrote a login")
 	}
+}
+
+func TestSetupEndsByRefreshingTheTokenAndInstallingTheJob(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := keyed(t)
+	gh, _ := installed(0)
+	gh.Token = func(string, int64, int64) (string, error) { return "ghs_secret", nil }
+	jobs := useJob(t, nil)
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	if code != 0 || *jobs != 1 || !strings.Contains(out.String(), "token refreshed") || strings.Contains(out.String(), "ghs_secret") {
+		t.Fatalf("setup = %d, %q, %d jobs\n%s", code, errOut.String(), *jobs, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "fleet", "gh", "hosts.yml")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetupInstallsNoJobWithoutAWorkingToken(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := keyed(t)
+	gh, _ := installed(0)
+	gh.Token = func(string, int64, int64) (string, error) { return "", errors.New("GitHub answered 401") }
+	jobs := useJob(t, nil)
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	if code != 1 || *jobs != 0 || !strings.Contains(errOut.String(), "401") {
+		t.Fatalf("setup = %d, %q, %d jobs", code, errOut.String(), *jobs)
+	}
+}
+
+func TestSetupSaysWhenLaunchdRefusesTheJob(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := keyed(t)
+	gh, _ := installed(0)
+	gh.Token = func(string, int64, int64) (string, error) { return "ghs_secret", nil }
+	useJob(t, errors.New("launchctl bootstrap: 125: start it at the Mac, not over SSH"))
+	var out, errOut bytes.Buffer
+	code := setupCmd([]string{"--github-user", "someone", "--app-id", "42", "--key", key, "--yes"}, dir, strings.NewReader(""), setup.Detected{}, gh, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "not over SSH") {
+		t.Fatalf("setup = %d, %q", code, errOut.String())
+	}
+}
+
+func useJob(t *testing.T, err error) *int {
+	old, calls := agentJob, 0
+	agentJob = func(string) (string, error) {
+		calls++
+		return "/h/Library/LaunchAgents/dev.fleet.agent-token.plist", err
+	}
+	t.Cleanup(func() { agentJob = old })
+	return &calls
 }
