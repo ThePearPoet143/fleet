@@ -50,4 +50,5 @@ jobs:
             dist/*/fleet
             dist/*/fleet.exe
             dist/checksums.txt
+            dist/**/*.rb
           retention-days: 7
