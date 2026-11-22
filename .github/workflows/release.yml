@@ -1,4 +1,5 @@
 # https://goreleaser.com/ci/actions/
+# https://goreleaser.com/resources/cookbooks/set-a-custom-git-tag/
 # Release files come only from here: a pushed v* tag on main, tested and built by CI, never from a laptop.
 name: release
 
@@ -30,3 +31,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The pushed tag, not whichever tag sorts first on its commit (v0.1.0-rc1 sorts before v0.1.0).
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
