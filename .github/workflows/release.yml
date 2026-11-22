@@ -1,5 +1,6 @@
 # https://goreleaser.com/ci/actions/
 # https://goreleaser.com/resources/cookbooks/set-a-custom-git-tag/
+# https://github.com/actions/create-github-app-token#inputs
 # Release files come only from here: a pushed v* tag on main, tested and built by CI, never from a laptop.
 name: release
 
@@ -25,6 +26,25 @@ jobs:
         run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
       - run: go vet ./...
       - run: go test ./...
+      # GoReleaser writes the cask to the tap, which the job's own token can't reach, so it asks the agents' app for a
+      # short-lived token with write access to homebrew-tap only.
+      - name: a token for the tap
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AGENTS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AGENTS_APP_KEY }}
+          repositories: homebrew-tap
+          permission-contents: write
+      - name: the app's commit name and email
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          id=$(gh api "/users/${SLUG}[bot]" --jq .id)
+          echo "name=${SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${id}+${SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           version: v2.20.3
@@ -33,3 +53,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The pushed tag, not whichever tag sorts first on its commit (v0.1.0-rc1 sorts before v0.1.0).
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          HOMEBREW_TAP_TOKEN: ${{ steps.app.outputs.token }}
+          TAP_COMMIT_NAME: ${{ steps.bot.outputs.name }}
+          TAP_COMMIT_EMAIL: ${{ steps.bot.outputs.email }}

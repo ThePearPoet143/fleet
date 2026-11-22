@@ -30,7 +30,7 @@ release:
   prerelease: auto
 
 # https://goreleaser.com/customization/homebrew_casks/
-# Each release also writes a cask to the tap repo: brew install ThePearPoet143/tap/fleet.
+# Each release also writes a cask to the tap repo: brew install --cask ThePearPoet143/tap/fleet.
 # An rc tag (v0.2.0-rc1) leaves the tap alone (skip_upload: auto).
 homebrew_casks:
   - name: fleet
@@ -46,9 +46,11 @@ homebrew_casks:
       name: '{{ envOrDefault "TAP_COMMIT_NAME" "goreleaserbot" }}'
       email: '{{ envOrDefault "TAP_COMMIT_EMAIL" "bot@goreleaser.com" }}'
     # fleet isn't signed yet (HQ-62), so macOS would block it with the quarantine mark brew adds. Remove this once it is.
+    # The staged file is fleet_darwin_<arch>, so the mark comes off the whole staged folder. Homebrew fills in
+    # {{staged_path}} at install time: https://docs.brew.sh/Cask-Cookbook#interpolation-in-steps-blocks
     hooks:
       post:
         install_steps: |
           on_macos do
-            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/fleet"]
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}"]
           end
