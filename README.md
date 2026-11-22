@@ -2,6 +2,23 @@
 
 Sets up and checks the machines AI agents run on, from one Go program.
 
+## Download
+
+Each release has one file per system and a `checksums.txt`, built by CI from a tag (`.github/workflows/release.yml`),
+never on a laptop. On a Mac with Apple silicon (`uname -m` says `arm64`; on Intel, use `fleet_darwin_amd64`):
+
+```
+curl -fsSLO https://github.com/ThePearPoet143/fleet/releases/latest/download/fleet_darwin_arm64
+curl -fsSLO https://github.com/ThePearPoet143/fleet/releases/latest/download/checksums.txt
+grep ' fleet_darwin_arm64$' checksums.txt | shasum -a 256 -c
+chmod +x fleet_darwin_arm64 && mv fleet_darwin_arm64 fleet
+./fleet doctor
+```
+
+Download it with `curl`, as here. Linux and Windows files (`fleet_linux_amd64`, `fleet_windows_amd64.exe` and the
+arm64 ones) are built too, but fleet supports only a Mac so far. Without a download, `go run ./cmd/fleet` from a clone
+runs the same program.
+
 ## The doctor
 
 A read-only check of this machine. It detects the system (`runtime.GOOS`): a Mac is supported, other systems say "not
