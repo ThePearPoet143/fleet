@@ -28,3 +28,27 @@ checksum:
 # A tag like v0.2.0-rc1 is a prerelease, so releases/latest keeps pointing at the last real one.
 release:
   prerelease: auto
+
+# https://goreleaser.com/customization/homebrew_casks/
+# Each release also writes a cask to the tap repo: brew install ThePearPoet143/tap/fleet.
+# An rc tag (v0.2.0-rc1) leaves the tap alone (skip_upload: auto).
+homebrew_casks:
+  - name: fleet
+    binaries: [fleet]
+    homepage: https://github.com/ThePearPoet143/fleet
+    description: Sets up and checks the machines AI agents run on
+    skip_upload: auto
+    repository:
+      owner: ThePearPoet143
+      name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+    commit_author:
+      name: '{{ envOrDefault "TAP_COMMIT_NAME" "goreleaserbot" }}'
+      email: '{{ envOrDefault "TAP_COMMIT_EMAIL" "bot@goreleaser.com" }}'
+    # fleet isn't signed yet (HQ-62), so macOS would block it with the quarantine mark brew adds. Remove this once it is.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/fleet"]
+          end
